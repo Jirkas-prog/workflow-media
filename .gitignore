@@ -1,0 +1,14 @@
+/target/
+/.build/
+/Standalone/
+/qa/
+/resources/tools.zip
+*.session
+*.log
+queue.json
+queue.json.bak
+cookies.txt
+*.pem
+*.preset.json
+*.preset.json.bak
+*.key
