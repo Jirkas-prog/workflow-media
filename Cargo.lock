@@ -6118,7 +6118,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "workflow-media"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -6156,6 +6156,7 @@ dependencies = [
  "tray-icon",
  "url",
  "uuid",
+ "windows",
  "windows-sys 0.59.0",
  "winreg",
  "winresource",

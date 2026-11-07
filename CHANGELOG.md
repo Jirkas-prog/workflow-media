@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+- Added a separate native Windows Setup Builder that creates one installer EXE containing portable recipient preferences.
+- Added configurable installation and shortcut destinations, defaulting to the recipient's Documents and Desktop and respecting Windows folder redirection.
+- Installers download and verify the latest signed GitHub release, apply the prepared preset and startup preference, create the selected shortcut and launch the app.
+- Added installation rollback and isolated integration-test support; personal credentials, cookies and history are excluded from exported profiles.
+- Made Run setup again directly accessible in Settings, with cancellation restoring the previous choices.
+- Fixed responsive settings layout: long paths wrap inside their fields and grow vertically without squeezing labels or pushing buttons outside the window.
+- Included English/Czech builder documentation and Windows/Linux build instructions.
+
 ## 0.5.3
 
 - Increased the configurable parallel-download limit to 16, including validation and saved settings.

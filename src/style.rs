@@ -302,9 +302,58 @@ pub fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
 pub fn text_area(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
     egui::TextEdit::multiline(text).margin(Vec2::new(11., 10.))
 }
+/// A single path/value with visual wrapping and content-driven height, not horizontal scrolling.
+pub fn wrapping_field(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    width: f32,
+    hint: &str,
+) -> egui::Response {
+    let response = ui.add(
+        egui::TextEdit::multiline(text)
+            .margin(Vec2::new(11., 8.))
+            .desired_rows(1)
+            .desired_width((width - 22.).max(24.))
+            .hint_text(hint),
+    );
+    if response.changed() {
+        // Line breaks are visual; a pasted path still remains one logical value.
+        text.retain(|c| c != '\r' && c != '\n');
+    }
+    response
+}
 pub fn title(ui: &mut egui::Ui, label: &str) {
     ui.label(RichText::new(label).size(18.).strong());
 }
 pub fn caption(ui: &mut egui::Ui, label: &str) {
     ui.label(RichText::new(label).size(12.).color(MUTED));
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    #[test]
+    fn long_paths_wrap_without_expanding_the_field_or_changing_the_value() {
+        let value = format!(
+            "C:\\Example\\{}cookies.txt",
+            "long-folder-name\\".repeat(12)
+        );
+        let measure = |width: f32| {
+            let ctx = egui::Context::default();
+            apply(&ctx);
+            let mut text = value.clone();
+            let mut rect = egui::Rect::NOTHING;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    rect = wrapping_field(ui, &mut text, width, "").rect;
+                });
+            });
+            assert_eq!(text, value);
+            assert!(rect.width() <= width + 1., "{rect:?}");
+            rect.height()
+        };
+        let narrow = measure(280.);
+        let wide = measure(560.);
+        assert!(narrow > wide && wide > 34., "{narrow} {wide}");
+    }
 }

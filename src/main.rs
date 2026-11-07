@@ -3,6 +3,7 @@ mod app;
 mod engine;
 mod fastshare;
 mod fragmented;
+mod installer;
 mod media;
 mod model;
 mod mux;
@@ -22,7 +23,13 @@ fn main() {
         if !std::env::args().any(|a| {
             matches!(
                 a.as_str(),
-                "--inspect-url" | "--download-url" | "--convert-media" | "--sign-release"
+                "--inspect-url"
+                    | "--download-url"
+                    | "--convert-media"
+                    | "--sign-release"
+                    | "--export-builder"
+                    | "--make-installer"
+                    | "--test-install-to"
             )
         }) {
             let _ = rfd::MessageDialog::new()
@@ -61,10 +68,49 @@ fn run() -> Result<()> {
             .map(|w| PathBuf::from(&w[1]))
     };
     let exe = std::env::current_exe()?;
+    if args.iter().any(|a| a == "--export-builder") {
+        return installer::export_builder(&arg("--output").context("Missing --output")?);
+    }
+    if args.iter().any(|a| a == "--make-installer") {
+        if !cfg!(windows) {
+            bail!("Build Windows installers on Windows");
+        }
+        let profile: installer::Profile =
+            serde_json::from_slice(&fs::read(arg("--profile").context("Missing --profile")?)?)?;
+        return installer::write_package(
+            &exe,
+            &arg("--output").context("Missing --output")?,
+            &installer::Package::Installer(profile),
+        );
+    }
+    let package = installer::read_package(&exe)?.map(|(_, p)| p);
+    let builder = args.iter().any(|a| a == "--setup-builder")
+        || matches!(package, Some(installer::Package::Builder));
+    if builder && !cfg!(windows) {
+        bail!("The installer builder targets Windows; the main application also builds on Linux");
+    }
+    if !builder {
+        if let Some(installer::Package::Installer(profile)) = package {
+            if let Some(root) = arg("--test-install-to") {
+                println!("{}", installer::test_install(&profile, &root)?.display());
+                return Ok(());
+            }
+            return installer::run(profile);
+        }
+    }
     let folder = exe.parent().context("Executable folder")?;
     let preview = args.iter().any(|a| a == "--setup-preview");
-    let isolated = args.iter().any(|a| a == "--isolated") || arg("--data").is_some();
-    let data = arg("--data").unwrap_or_else(platform::app_data);
+    let isolated = builder || args.iter().any(|a| a == "--isolated") || arg("--data").is_some();
+    let builder_temp = if builder {
+        Some(tempfile::tempdir()?)
+    } else {
+        None
+    };
+    let data = builder_temp
+        .as_ref()
+        .map(|d| d.path().to_path_buf())
+        .or_else(|| arg("--data"))
+        .unwrap_or_else(platform::app_data);
     if !data.is_absolute() {
         bail!("--data must be an absolute path");
     }
@@ -84,7 +130,11 @@ fn run() -> Result<()> {
         }
         return Err(error).context("Cannot lock application instance");
     }
-    let preset_path = arg("--preset").unwrap_or_else(|| folder.join("WorkFlow Media.preset.json"));
+    let preset_path = if builder {
+        data.join("builder.preset.json")
+    } else {
+        arg("--preset").unwrap_or_else(|| folder.join("WorkFlow Media.preset.json"))
+    };
     // A separate application data directory protects the previous .NET version.
     if !isolated && !preview && !data.join("queue.json").exists() {
         if let Some(legacy) = platform::legacy_data() {
@@ -114,8 +164,8 @@ fn run() -> Result<()> {
     } else {
         None
     };
-    let setup = preview || !preset.as_ref().is_some_and(|p| p.setup_completed);
-    if setup && !preview && !args.iter().any(|a| a == "--no-uac") {
+    let setup = builder || preview || !preset.as_ref().is_some_and(|p| p.setup_completed);
+    if setup && !preview && !builder && !args.iter().any(|a| a == "--no-uac") {
         platform::authorize_setup()?;
     }
     let engine = engine::Engine::new(&data, preset.map(|p| p.settings))?;
@@ -123,7 +173,11 @@ fn run() -> Result<()> {
     let (w, h) = icon.dimensions();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title(format!("WorkFlow Media · {}", updater::VERSION))
+            .with_title(format!(
+                "WorkFlow Media{} · {}",
+                if builder { " · Setup Builder" } else { "" },
+                updater::VERSION
+            ))
             .with_inner_size([1200., 680.])
             .with_min_inner_size([1024., 620.])
             .with_icon(eframe::egui::IconData {
@@ -150,6 +204,7 @@ fn run() -> Result<()> {
                 preview,
                 background,
                 initial_signal,
+                builder,
             )))
         }),
     )

@@ -1,4 +1,3 @@
-#[cfg(not(windows))]
 use anyhow::Context;
 use anyhow::{Result, bail};
 use std::{
@@ -324,6 +323,48 @@ pub fn authorize_setup() -> Result<()> {
         if exit != 0 {
             bail!("Administrator check failed / Ověření správce selhalo");
         }
+    }
+    Ok(())
+}
+
+/// Called from the installer worker so COM is initialized on its own thread.
+#[cfg(windows)]
+pub fn create_shortcut(exe: &Path, shortcut: &Path) -> Result<()> {
+    use windows::{
+        Win32::{
+            System::Com::{
+                CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+                CoUninitialize, IPersistFile,
+            },
+            UI::Shell::{IShellLinkW, ShellLink},
+        },
+        core::{Interface, PCWSTR},
+    };
+    if let Some(parent) = shortcut.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok()?;
+    }
+    struct ComGuard;
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+    let _com = ComGuard;
+    let link: IShellLinkW = unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)? };
+    let executable = wide(exe);
+    let folder = wide(exe.parent().context("Application directory")?);
+    let output = wide(shortcut);
+    unsafe {
+        link.SetPath(PCWSTR(executable.as_ptr()))?;
+        link.SetWorkingDirectory(PCWSTR(folder.as_ptr()))?;
+        link.SetIconLocation(PCWSTR(executable.as_ptr()), 0)?;
+        let file: IPersistFile = link.cast()?;
+        file.Save(PCWSTR(output.as_ptr()), true)?;
     }
     Ok(())
 }

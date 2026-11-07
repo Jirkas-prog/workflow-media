@@ -4,7 +4,9 @@ A Rust desktop downloader with a dark interface, a download queue and a separate
 
 [![Download for Windows](https://img.shields.io/badge/DOWNLOAD_FOR_WINDOWS-PORTABLE_EXE-c4fa67?style=for-the-badge&logo=windows&logoColor=152731)](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Windows-x64.exe)
 
-[Česky](README.cs.md) · [Linux build guide](BUILD-LINUX.md) · [Build and release](BUILD.md) · [Licenses](THIRD-PARTY.md)
+[![Download Setup Builder](https://img.shields.io/badge/SETUP_BUILDER-WINDOWS_EXE-86c8db?style=for-the-badge&logo=windows&logoColor=152731)](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Setup-Builder-Windows-x64.exe)
+
+[Česky](README.cs.md) · [Setup Builder guide](SETUP-BUILDER.md) · [Linux build guide](BUILD-LINUX.md) · [Build and release](BUILD.md) · [Licenses](THIRD-PARTY.md)
 
 ## Features
 
@@ -16,6 +18,8 @@ A Rust desktop downloader with a dark interface, a download queue and a separate
 - One running instance per user profile: opening the EXE again restores the existing window.
 - Header menus for sorting/filtering, optional columns, file information, copy/move without overwriting, and confirmed recycle-bin deletion.
 - Signed GitHub release updates, checked manually or automatically when enabled.
+- Up to 16 parallel downloads and a setup guide that can be reopened from Settings.
+- A separate Windows Setup Builder that creates one EXE to download, verify, install and configure the app for someone else.
 
 ## Windows
 
@@ -24,6 +28,12 @@ Download the portable x64 EXE into a writable folder and open it. The initial gu
 The program is one executable. It creates `WorkFlow Media.preset.json` beside itself and stores the queue/library separately in the user's application-data directory. Completed downloads stay in the selected destination. Interrupted media streams are kept in `.workflow-partials` inside that destination for resume.
 
 FastShare username, password and session are encrypted with Windows DPAPI. They are not placed in the portable preset. **Sign out and forget** removes the stored credentials. On Linux the application uses Secret Service; without an available, unlocked keyring it reports a storage error instead of saving the password in plain text.
+
+## Prepare an installation for someone else
+
+Open **WorkFlow Media Setup Builder**, go through its four steps and choose **Create installer EXE**. Share the resulting file. The recipient opens it, approves the administrator check, and the installer downloads the latest signed release, writes the prepared preset and launches the application. Internet access is required during installation.
+
+By default, the app goes into **Documents → WorkFlow Media** and its shortcut onto **Desktop**. Both locations are configurable and resolved from the recipient's Windows special folders, including OneDrive redirection. Passwords, cookies and your local files are excluded. See the [full guide](SETUP-BUILDER.md).
 
 ## Service compatibility
 

@@ -6,6 +6,8 @@ Samostatná aplikace v Rustu pro stahování a správu médií. Rozhraní je če
 
 [Stáhnout aplikaci pro Windows](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Windows-x64.exe) · [Kompilace Linuxu](BUILD-LINUX.cs.md)
 
+[Stáhnout generátor instalace pro Windows](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Setup-Builder-Windows-x64.exe) · [Návod generátoru](SETUP-BUILDER.cs.md)
+
 Stačí jeden EXE soubor. Při prvním otevření vás průvodce provede nastavením. Vedle programu vznikne předvolba `WorkFlow Media.preset.json`; po jejím uložení se průvodce příště přeskočí. Soubor uložte do složky, do které můžete zapisovat.
 
 - Výchozí kvalita je nejvyšší dostupná. Každá služba může mít vlastní kvalitu a formát.
@@ -19,3 +21,11 @@ Stačí jeden EXE soubor. Při prvním otevření vás průvodce provede nastave
 Stahování, spojování obrazu a zvuku i tvorba MP3 probíhají uvnitř Rust aplikace. Nepotřebuje instalovat .NET, Python, yt-dlp, FFmpeg ani Deno.
 
 Živě bylo ověřeno YouTube MP4, MKV a MP3. Dostupnost příspěvků na dalších službách závisí na jejich aktuálních pravidlech a přihlašování. MP3 zatím nepřevádí zvuk dostupný pouze v Opusu. DRM se neobchází. Více podrobností obsahuje [anglická dokumentace](README.md).
+
+## Instalace pro dalšího člověka
+
+Samostatný **WorkFlow Media Setup Builder** vás provede čtyřmi kroky. Zvolíte nastavení příjemce a uložíte jeden instalační EXE. Příjemce jej otevře, potvrdí správce a instalátor stáhne aktuální podepsanou aplikaci z GitHubu, uloží připravené nastavení a spustí ji. Potřebuje internet.
+
+Výchozí umístění je **Dokumenty → WorkFlow Media**, zástupce se vytvoří na **Ploše**. Obojí lze změnit. Použijí se skutečné systémové složky příjemce, nezávisle na jeho jménu nebo přesměrování do OneDrivu. Hesla, cookies, historie ani vaše osobní soubory se nepřenášejí.
+
+Průvodce vlastní aplikace lze opět otevřít tlačítkem **Spustit průvodce znovu** nahoře v Nastavení. Souběžné stahování umožňuje 1–16 úloh. Dlouhé cesty se zalamují uvnitř polí a jejich výška roste podle obsahu.

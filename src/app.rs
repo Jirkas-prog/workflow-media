@@ -54,6 +54,7 @@ enum Event {
     Search(Result<Vec<crate::fastshare::SearchResult>>),
     Update(Result<Option<updater::Manifest>>),
     Downloaded(Result<PathBuf>),
+    Exported(Result<PathBuf>),
     Stopped,
 }
 enum Confirm {
@@ -82,6 +83,11 @@ pub struct App {
     exe: PathBuf,
     setup: Option<usize>,
     preview: bool,
+    builder: bool,
+    builder_folder: String,
+    install_location: crate::installer::Location,
+    created_installer: Option<PathBuf>,
+    setup_saved: Option<Settings>,
     links: String,
     format: String,
     quality: i32,
@@ -124,6 +130,7 @@ impl App {
         preview: bool,
         background: bool,
         initial_signal: Option<String>,
+        builder: bool,
     ) -> Self {
         style::apply(&cc.egui_ctx);
         let state = engine.snapshot();
@@ -131,13 +138,17 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         let (tray_tx, tray_rx) = std::sync::mpsc::channel();
         let wake = platform::WindowWake::new(cc);
-        let tray = tray::Tray::new(&settings.language, tray_tx.clone(), wake.clone());
+        let tray = if builder {
+            Ok(None)
+        } else {
+            tray::Tray::new(&settings.language, tray_tx.clone(), wake.clone()).map(Some)
+        };
         let notice = tray
             .as_ref()
             .err()
             .map(|e| format!("Tray / Ikona u hodin: {e}"))
             .unwrap_or_default();
-        let tray = tray.ok();
+        let tray = tray.ok().flatten();
         if background && !setup && tray.is_some() {
             cc.egui_ctx
                 .send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -157,6 +168,11 @@ impl App {
             exe: std::env::current_exe().unwrap_or_default(),
             setup: setup.then_some(0),
             preview,
+            builder,
+            builder_folder: "WorkFlow Media".into(),
+            install_location: crate::installer::Location::default(),
+            created_installer: None,
+            setup_saved: None,
             links: String::new(),
             selected: HashSet::new(),
             anchor: None,
@@ -191,51 +207,53 @@ impl App {
         }
         let tx = app.tx.clone();
         let ctx = cc.egui_ctx.clone();
-        std::thread::spawn(move || {
-            let mut clipboard = arboard::Clipboard::new().ok();
-            let mut last = clipboard
-                .as_mut()
-                .and_then(|c| c.get_text().ok())
-                .unwrap_or_default();
-            while !stop.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(400));
-                if stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                // Process tray actions, second launches and updates even while hidden.
-                wake.request();
-                if clipboard.is_none() {
-                    clipboard = arboard::Clipboard::new().ok();
-                }
-                let Some(text) = clipboard.as_mut().and_then(|c| c.get_text().ok()) else {
-                    continue;
-                };
-                if text == last {
-                    continue;
-                }
-                last = text.clone();
-                if !monitor_ready.load(Ordering::Relaxed) {
-                    continue;
-                }
-                let s = engine.snapshot().settings;
-                let links = model::clipboard_links(&text, &s);
-                if links.is_empty() {
-                    continue;
-                }
-                let result = engine.add_presets(&links).map(|n| {
-                    if n > 0 {
-                        format!(
-                            "{}: {n}",
-                            tr(&s.language, "Přidáno ze schránky", "Added from clipboard")
-                        )
-                    } else {
-                        String::new()
+        if !builder {
+            std::thread::spawn(move || {
+                let mut clipboard = arboard::Clipboard::new().ok();
+                let mut last = clipboard
+                    .as_mut()
+                    .and_then(|c| c.get_text().ok())
+                    .unwrap_or_default();
+                while !stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(400));
+                    if stop.load(Ordering::Relaxed) {
+                        break;
                     }
-                });
-                let _ = tx.send(Event::Notice(result));
-                ctx.request_repaint();
-            }
-        });
+                    // Process tray actions, second launches and updates even while hidden.
+                    wake.request();
+                    if clipboard.is_none() {
+                        clipboard = arboard::Clipboard::new().ok();
+                    }
+                    let Some(text) = clipboard.as_mut().and_then(|c| c.get_text().ok()) else {
+                        continue;
+                    };
+                    if text == last {
+                        continue;
+                    }
+                    last = text.clone();
+                    if !monitor_ready.load(Ordering::Relaxed) {
+                        continue;
+                    }
+                    let s = engine.snapshot().settings;
+                    let links = model::clipboard_links(&text, &s);
+                    if links.is_empty() {
+                        continue;
+                    }
+                    let result = engine.add_presets(&links).map(|n| {
+                        if n > 0 {
+                            format!(
+                                "{}: {n}",
+                                tr(&s.language, "Přidáno ze schránky", "Added from clipboard")
+                            )
+                        } else {
+                            String::new()
+                        }
+                    });
+                    let _ = tx.send(Event::Notice(result));
+                    ctx.request_repaint();
+                }
+            });
+        }
         if app.preview {
             app.notice = tr(
                 &app.settings.language,
@@ -435,6 +453,21 @@ impl App {
         }
         while let Ok(event) = self.rx.try_recv() {
             match event {
+                Event::Exported(result) => {
+                    self.busy = self.busy.saturating_sub(1);
+                    match result {
+                        Ok(path) => {
+                            self.notice = self
+                                .t(
+                                    "Instalační soubor je připravený k předání.",
+                                    "The installer is ready to share.",
+                                )
+                                .into();
+                            self.created_installer = Some(path);
+                        }
+                        Err(e) => self.result(Err::<String, _>(e)),
+                    }
+                }
                 Event::Notice(result) => match result {
                     Ok(s) if s.is_empty() => {}
                     other => self.result(other),
@@ -699,7 +732,7 @@ impl App {
                     style::caption(ui, tr(&lang, "Uložit do", "Save to"));
                     ui.horizontal(|ui| {
                         let width = (ui.available_width() - 205.).max(100.);
-                        ui.add_sized([width, 32.], style::text_field(&mut self.destination));
+                        style::wrapping_field(ui, &mut self.destination, width, "");
                         if ui
                             .button("…")
                             .on_hover_text(tr(&lang, "Vybrat složku", "Choose folder"))
@@ -1494,12 +1527,199 @@ fn sort_jobs(jobs: &mut [Job], sort: Sort) {
 }
 
 impl App {
+    fn begin_setup(&mut self) {
+        self.setup_saved = Some(self.settings.clone());
+        self.setup = Some(0);
+        self.notice.clear();
+    }
+
+    fn export_installer(&mut self, ctx: &egui::Context) {
+        let profile = match crate::installer::Profile::from_settings(
+            &self.settings,
+            self.builder_folder.clone(),
+            self.install_location.clone(),
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                self.result(Err::<String, _>(e));
+                return;
+            }
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Windows application", &["exe"])
+            .set_file_name("WorkFlow Media Setup.exe")
+            .save_file()
+        else {
+            return;
+        };
+        let source = self.exe.clone();
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        self.busy += 1;
+        std::thread::spawn(move || {
+            let result = crate::installer::write_package(
+                &source,
+                &path,
+                &crate::installer::Package::Installer(profile),
+            )
+            .map(|_| path);
+            let _ = tx.send(Event::Exported(result));
+            ctx.request_repaint();
+        });
+    }
+
+    fn installer_summary(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.language.clone();
+        style::title(
+            ui,
+            tr(&lang, "Co příjemce dostane", "What the recipient gets"),
+        );
+        ui.label(tr(&lang, "Jeden EXE: stažení aplikace z GitHubu, ověření podpisu, instalace a hotové nastavení.", "One EXE: download from GitHub, signature verification, installation and prepared settings."));
+        ui.add_space(12.);
+        egui::Grid::new("installer-summary")
+            .spacing([24., 12.])
+            .show(ui, |ui| {
+                ui.label(tr(&lang, "Stahování", "Downloads"));
+                ui.label(format!(
+                    "{} / {}",
+                    tr(&lang, "Stažené u příjemce", "Recipient's Downloads"),
+                    self.builder_folder
+                ));
+                ui.end_row();
+                ui.label(tr(&lang, "Souběžné úlohy", "Parallel downloads"));
+                ui.label(self.settings.parallel.to_string());
+                ui.end_row();
+                ui.label(tr(&lang, "Kvalita a formát", "Quality and format"));
+                ui.label(format!(
+                    "{} · {}",
+                    quality_label(self.settings.quality, &lang),
+                    self.settings.format
+                ));
+                ui.end_row();
+                ui.label(tr(&lang, "Spuštění po přihlášení", "Start at sign-in"));
+                ui.label(tr(
+                    &lang,
+                    if self.settings.start_with_windows {
+                        "Ano"
+                    } else {
+                        "Ne"
+                    },
+                    if self.settings.start_with_windows {
+                        "Yes"
+                    } else {
+                        "No"
+                    },
+                ));
+                ui.end_row();
+                ui.label(tr(&lang, "Schránka", "Clipboard"));
+                ui.label(match self.settings.clipboard_mode {
+                    ClipboardMode::Off => tr(&lang, "Vypnuto", "Off").into(),
+                    ClipboardMode::All => tr(
+                        &lang,
+                        "Všechny podporované služby",
+                        "All supported services",
+                    )
+                    .into(),
+                    ClipboardMode::Selected => self.settings.clipboard_sources.join(", "),
+                });
+                ui.end_row();
+            });
+        ui.add_space(14.);
+        self.installer_locations(ui);
+        style::caption(
+            ui,
+            tr(
+                &lang,
+                "Příjemce potvrdí správce. Instalace a automatické spouštění patří jeho uživatelskému účtu. Hesla, cookies a soukromé soubory se nepřenášejí.",
+                "The recipient confirms the administrator prompt. Installation and autostart belong to their user account. Passwords, cookies and private files are not included.",
+            ),
+        );
+        if let Some(path) = &self.created_installer {
+            ui.add_space(16.);
+            ui.colored_label(
+                LIME,
+                tr(&lang, "Instalační soubor vytvořen", "Installer created"),
+            );
+            ui.add(egui::Label::new(path.display().to_string()).wrap());
+            if ui
+                .button(tr(&lang, "Zobrazit soubor", "Show file"))
+                .clicked()
+            {
+                let _ = platform::open_location(path);
+            }
+        }
+    }
+
+    fn installer_locations(&mut self, ui: &mut egui::Ui) {
+        use crate::installer::UserFolder;
+        let lang = self.settings.language.clone();
+        ui.separator();
+        style::title(ui, tr(&lang, "Umístění u příjemce", "Recipient locations"));
+        ui.label(tr(
+            &lang,
+            "Nainstalovat aplikaci do",
+            "Install the application in",
+        ));
+        egui::ComboBox::from_id_salt("install-folder")
+            .selected_text(self.install_location.folder.label(&lang))
+            .show_ui(ui, |ui| {
+                for folder in [
+                    UserFolder::Documents,
+                    UserFolder::Desktop,
+                    UserFolder::Downloads,
+                    UserFolder::Programs,
+                ] {
+                    ui.selectable_value(
+                        &mut self.install_location.folder,
+                        folder,
+                        folder.label(&lang),
+                    );
+                }
+            });
+        ui.label(tr(&lang, "Podsložka aplikace", "Application subfolder"));
+        style::wrapping_field(
+            ui,
+            &mut self.install_location.subfolder,
+            ui.available_width(),
+            "WorkFlow Media",
+        );
+        ui.label(tr(&lang, "Umístit zástupce do", "Place the shortcut in"));
+        egui::ComboBox::from_id_salt("shortcut-folder")
+            .selected_text(
+                self.install_location
+                    .shortcut
+                    .map(|f| f.label(&lang))
+                    .unwrap_or(tr(&lang, "Bez zástupce", "No shortcut")),
+            )
+            .show_ui(ui, |ui| {
+                for folder in [
+                    UserFolder::Desktop,
+                    UserFolder::Documents,
+                    UserFolder::Downloads,
+                    UserFolder::StartMenu,
+                ] {
+                    ui.selectable_value(
+                        &mut self.install_location.shortcut,
+                        Some(folder),
+                        folder.label(&lang),
+                    );
+                }
+                ui.selectable_value(
+                    &mut self.install_location.shortcut,
+                    None,
+                    tr(&lang, "Bez zástupce", "No shortcut"),
+                );
+            });
+        ui.add(egui::Label::new(tr(&lang,
+            "Složky se zjistí až na počítači příjemce. Fungují i při jiném jménu uživatele nebo přesměrování do OneDrivu.",
+            "Folders are resolved on the recipient's computer, including a different username or OneDrive redirection.")).wrap());
+        ui.add_space(8.);
+    }
+
     fn general_settings(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
-        egui::Grid::new("general-settings")
-            .num_columns(2)
-            .spacing([25., 15.])
-            .show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.vertical(|ui| {
                 ui.label(tr(&lang, "Jazyk aplikace", "Application language"));
                 egui::ComboBox::from_id_salt("language")
                     .selected_text(if lang == "cs" { "Čeština" } else { "English" })
@@ -1507,23 +1727,9 @@ impl App {
                         ui.selectable_value(&mut self.settings.language, "cs".into(), "Čeština");
                         ui.selectable_value(&mut self.settings.language, "en".into(), "English");
                     });
-                ui.end_row();
-                ui.label(tr(&lang, "Výchozí složka", "Default folder"));
-                ui.horizontal(|ui| {
-                    ui.add(
-                        style::text_field(&mut self.settings.download_directory)
-                            .desired_width((ui.available_width() - 65.).max(150.)),
-                    );
-                    if ui.button("…").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_directory(&self.settings.download_directory)
-                            .pick_folder()
-                        {
-                            self.settings.download_directory = path.to_string_lossy().into();
-                        }
-                    }
-                });
-                ui.end_row();
+            });
+            ui.add_space(20.);
+            ui.vertical(|ui| {
                 ui.label(tr(&lang, "Souběžná stahování", "Parallel downloads"));
                 egui::ComboBox::from_id_salt("parallel")
                     .height(320.)
@@ -1533,8 +1739,34 @@ impl App {
                             ui.selectable_value(&mut self.settings.parallel, n, n.to_string());
                         }
                     });
-                ui.end_row();
             });
+        });
+        ui.add_space(8.);
+        ui.label(if self.builder {
+            tr(
+                &lang,
+                "Podsložka ve Stažených u příjemce",
+                "Subfolder in recipient's Downloads",
+            )
+        } else {
+            tr(&lang, "Výchozí složka", "Default folder")
+        });
+        if self.builder {
+            style::wrapping_field(ui, &mut self.builder_folder, ui.available_width(), "");
+        } else {
+            ui.horizontal_top(|ui| {
+                let width = ui.available_width() - 40. - ui.spacing().item_spacing.x;
+                style::wrapping_field(ui, &mut self.settings.download_directory, width, "");
+                if ui.add_sized([40., 34.], egui::Button::new("…")).clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_directory(&self.settings.download_directory)
+                        .pick_folder()
+                    {
+                        self.settings.download_directory = path.to_string_lossy().into();
+                    }
+                }
+            });
+        }
         ui.add_space(10.);
         style::checkbox(
             ui,
@@ -1864,6 +2096,60 @@ impl App {
             ),
         );
     }
+    fn cookies_settings(&mut self, ui: &mut egui::Ui) {
+        let lang = self.settings.language.clone();
+        style::title(
+            ui,
+            tr(
+                &lang,
+                "Cookies pro přihlášené služby",
+                "Cookies for signed-in services",
+            ),
+        );
+        // Reserve both buttons; the field grows vertically for long paths.
+        let available = ui.available_width();
+        let mut browse = false;
+        let mut clear = false;
+        let mut controls = |ui: &mut egui::Ui| {
+            browse = ui
+                .add_sized([40., 34.], egui::Button::new("…"))
+                .on_hover_text(tr(&lang, "Vybrat soubor cookies", "Choose cookies file"))
+                .clicked();
+            clear = ui
+                .add_sized([94., 34.], egui::Button::new(tr(&lang, "Vymazat", "Clear")))
+                .clicked();
+        };
+        let hint = tr(
+            &lang,
+            "Volitelný soubor cookies.txt",
+            "Optional cookies.txt file",
+        );
+        if available < 300. {
+            style::wrapping_field(ui, &mut self.settings.cookies_file, available, hint);
+            ui.horizontal(&mut controls);
+        } else {
+            ui.horizontal_top(|ui| {
+                let width = available - 134. - 2. * ui.spacing().item_spacing.x;
+                style::wrapping_field(ui, &mut self.settings.cookies_file, width, hint);
+                controls(ui);
+            });
+        }
+        if browse {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Netscape cookies", &["txt"])
+                .pick_file()
+            {
+                self.settings.cookies_file = path.to_string_lossy().into();
+            }
+        }
+        if clear {
+            self.settings.cookies_file.clear();
+        }
+        ui.add(egui::Label::new(RichText::new(tr(&lang,
+            "Pro videa vyžadující přihlášení použijte vlastní export cookies ve formátu Netscape. Soubor se nikam neodesílá; aplikace jej používá pro příslušné weby.",
+            "For videos that require sign-in, select your own Netscape-format cookie export. The application uses these cookies for the corresponding sites."))
+            .size(12.).color(MUTED)).wrap());
+    }
     fn settings_page(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
         ui.horizontal(|ui| {
@@ -1882,30 +2168,157 @@ impl App {
                     }
                     self.result(r);
                 }
+                if ui
+                    .button(tr(&lang, "Spustit průvodce znovu", "Run setup again"))
+                    .clicked()
+                {
+                    self.begin_setup();
+                }
             });
         });
         ui.add_space(8.);
-        egui::ScrollArea::vertical().id_salt("settings-scroll").auto_shrink([false,false]).show(ui,|ui|{
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Aplikace a ukládání","Application and storage"));ui.add_space(8.);self.general_settings(ui);});ui.add_space(12.);
-            style::card().show(ui,|ui|self.clipboard_settings(ui));ui.add_space(12.);
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Kvalita a formáty","Quality and formats"));ui.add_space(8.);self.quality_settings(ui);});ui.add_space(12.);
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Účet FastShare","FastShare account"));self.account_settings(ui);});ui.add_space(12.);
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Cookies pro přihlášené služby","Cookies for signed-in services"));ui.horizontal(|ui|{ui.add(style::text_field(&mut self.settings.cookies_file).desired_width((ui.available_width()-130.).max(150.)).hint_text(tr(&lang,"Volitelný soubor cookies.txt","Optional cookies.txt file")));if ui.button("…").clicked(){if let Some(p)=rfd::FileDialog::new().add_filter("Netscape cookies",&["txt"]).pick_file(){self.settings.cookies_file=p.to_string_lossy().into();}}if ui.button(tr(&lang,"Vymazat","Clear")).clicked(){self.settings.cookies_file.clear();}});style::caption(ui,tr(&lang,"Pro videa vyžadující přihlášení použijte vlastní export cookies ve formátu Netscape. Soubor se nikam neodesílá; stahovací nástroj jej používá pro příslušné weby.","For videos that require sign-in, select your own Netscape-format cookie export. The downloader uses these cookies for the corresponding sites."));});ui.add_space(12.);
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Aktualizace","Updates"));self.update_settings(ui);});ui.add_space(12.);
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Nápověda a data","Help and data"));ui.horizontal_wrapped(|ui|{if ui.button(tr(&lang,"Otevřít nápovědu","Open help")).clicked(){let path=self.data.join(if lang=="cs"{"help.cs.html"}else{"help.en.html"});let text=if lang=="cs"{include_str!("../resources/help.cs.html")}else{include_str!("../resources/help.en.html")};let result=model::atomic_write(&path,text.as_bytes()).and_then(|_|open::that(path).map_err(Into::into)).map(|_|"");self.result(result);}if ui.button(tr(&lang,"Zobrazit průvodce znovu","Show setup again")).clicked(){self.setup=Some(0);}if ui.button(tr(&lang,"Složka dat","Data folder")).clicked(){self.result(open::that(&self.data).map(|_|"").map_err(Into::into));}if ui.button(tr(&lang,"Licence nástrojů","Tool licenses")).clicked(){let path=self.data.join("THIRD-PARTY-LICENSES.txt");let result=model::atomic_write(&path,include_bytes!("../THIRD-PARTY-LICENSES.txt")).and_then(|_|open::that(path).map_err(Into::into));self.result(result.map(|_|""));}});style::caption(ui,&format!("{}: {}",tr(&lang,"Předvolba","Preset"),self.preset.display()));});ui.add_space(15.);
-        });
+        egui::ScrollArea::vertical()
+            .id_salt("settings-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_max_width(ui.available_width());
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                style::card().show(ui, |ui| {
+                    style::title(
+                        ui,
+                        tr(&lang, "Aplikace a ukládání", "Application and storage"),
+                    );
+                    ui.add_space(8.);
+                    self.general_settings(ui);
+                });
+                ui.add_space(12.);
+                style::card().show(ui, |ui| self.clipboard_settings(ui));
+                ui.add_space(12.);
+                style::card().show(ui, |ui| {
+                    style::title(ui, tr(&lang, "Kvalita a formáty", "Quality and formats"));
+                    ui.add_space(8.);
+                    self.quality_settings(ui);
+                });
+                ui.add_space(12.);
+                style::card().show(ui, |ui| {
+                    style::title(ui, tr(&lang, "Účet FastShare", "FastShare account"));
+                    self.account_settings(ui);
+                });
+                ui.add_space(12.);
+                style::card().show(ui, |ui| self.cookies_settings(ui));
+                ui.add_space(12.);
+                style::card().show(ui, |ui| {
+                    style::title(ui, tr(&lang, "Aktualizace", "Updates"));
+                    self.update_settings(ui);
+                });
+                ui.add_space(12.);
+                if cfg!(windows) {
+                    style::card().show(ui, |ui| {
+                        style::title(
+                            ui,
+                            tr(
+                                &lang,
+                                "Instalace pro další počítač",
+                                "Installation for another computer",
+                            ),
+                        );
+                        style::caption(
+                            ui,
+                            tr(
+                                &lang,
+                                "Připravte jeden instalační EXE s nastavením pro příjemce.",
+                                "Prepare a single installer EXE with settings for its recipient.",
+                            ),
+                        );
+                        if ui
+                            .button(tr(
+                                &lang,
+                                "Otevřít generátor instalace",
+                                "Open setup builder",
+                            ))
+                            .clicked()
+                        {
+                            let result = platform::command(&self.exe)
+                                .arg("--setup-builder")
+                                .spawn()
+                                .map(|_| "")
+                                .map_err(Into::into);
+                            self.result(result);
+                        }
+                    });
+                    ui.add_space(12.);
+                }
+                style::card().show(ui, |ui| {
+                    style::title(ui, tr(&lang, "Nápověda a data", "Help and data"));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .button(tr(&lang, "Otevřít nápovědu", "Open help"))
+                            .clicked()
+                        {
+                            let path = self.data.join(if lang == "cs" {
+                                "help.cs.html"
+                            } else {
+                                "help.en.html"
+                            });
+                            let text = if lang == "cs" {
+                                include_str!("../resources/help.cs.html")
+                            } else {
+                                include_str!("../resources/help.en.html")
+                            };
+                            let result = model::atomic_write(&path, text.as_bytes())
+                                .and_then(|_| open::that(path).map_err(Into::into))
+                                .map(|_| "");
+                            self.result(result);
+                        }
+                        if ui.button(tr(&lang, "Složka dat", "Data folder")).clicked() {
+                            self.result(open::that(&self.data).map(|_| "").map_err(Into::into));
+                        }
+                        if ui
+                            .button(tr(&lang, "Licence nástrojů", "Tool licenses"))
+                            .clicked()
+                        {
+                            let path = self.data.join("THIRD-PARTY-LICENSES.txt");
+                            let result = model::atomic_write(
+                                &path,
+                                include_bytes!("../THIRD-PARTY-LICENSES.txt"),
+                            )
+                            .and_then(|_| open::that(path).map_err(Into::into));
+                            self.result(result.map(|_| ""));
+                        }
+                    });
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!(
+                                "{}: {}",
+                                tr(&lang, "Předvolba", "Preset"),
+                                self.preset.display()
+                            ))
+                            .size(12.)
+                            .color(MUTED),
+                        )
+                        .wrap(),
+                    );
+                });
+                ui.add_space(15.);
+            });
     }
     fn wizard(&mut self, ui: &mut egui::Ui) {
         let step = self.setup.unwrap_or(0);
+        let last_step = if self.builder { 3 } else { 2 };
         let lang = self.settings.language.clone();
         ui.add_space(18.);
         ui.label(
             RichText::new(format!(
-                "{}  /  {} {} {} 3",
-                tr(&lang, "NASTAVENÍ APLIKACE", "APPLICATION SETUP"),
+                "{}  /  {} {} {} {}",
+                if self.builder {
+                    tr(&lang, "GENERÁTOR INSTALACE", "SETUP BUILDER")
+                } else {
+                    tr(&lang, "NASTAVENÍ APLIKACE", "APPLICATION SETUP")
+                },
                 tr(&lang, "KROK", "STEP"),
                 step + 1,
-                tr(&lang, "ZE", "OF")
+                tr(&lang, "ZE", "OF"),
+                last_step + 1
             ))
             .color(LIME)
             .size(12.)
@@ -1913,6 +2326,18 @@ impl App {
         );
         ui.add_space(8.);
         let (title, subtitle) = match step {
+            0 if self.builder => (
+                tr(
+                    &lang,
+                    "Připravte instalaci pro další počítač",
+                    "Prepare another computer's setup",
+                ),
+                tr(
+                    &lang,
+                    "Zvolte nastavení pro příjemce. Na tomto počítači se nic nepřenastaví.",
+                    "Choose the recipient's preferences. This computer's settings will not change.",
+                ),
+            ),
             0 => (
                 tr(
                     &lang,
@@ -1933,12 +2358,20 @@ impl App {
                     "Enable automatic downloads for the services you want to monitor.",
                 ),
             ),
-            _ => (
+            2 => (
                 tr(&lang, "Vaše výchozí kvalita", "Your default quality"),
                 tr(
                     &lang,
                     "Nastavení se uloží do souboru vedle aplikace. Kdykoliv ho později změníte.",
                     "Preferences are saved next to the application. You can change them at any time.",
+                ),
+            ),
+            _ => (
+                tr(&lang, "Připraveno k předání", "Ready to share"),
+                tr(
+                    &lang,
+                    "Uložte jeden EXE. Příjemce jej otevře a potvrdí správce; zbytek proběhne automaticky.",
+                    "Save one EXE. The recipient opens it and approves the administrator prompt; the rest is automatic.",
                 ),
             ),
         };
@@ -1977,28 +2410,41 @@ impl App {
                             );
                         }
                         1 => self.clipboard_settings(ui),
-                        _ => self.quality_settings(ui),
+                        2 => self.quality_settings(ui),
+                        _ => self.installer_summary(ui),
                     }
                 });
             });
         ui.add_space(12.);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if style::primary(
-                ui,
+            let next_label = if self.builder && step == last_step {
+                tr(&lang, "Vytvořit instalační EXE", "Create installer EXE")
+            } else {
                 tr(
                     &lang,
-                    if step == 2 {
+                    if step == last_step {
                         "Uložit a spustit"
                     } else {
                         "Další"
                     },
-                    if step == 2 { "Save and start" } else { "Next" },
-                ),
-            )
-            .clicked()
+                    if step == last_step {
+                        "Save and start"
+                    } else {
+                        "Next"
+                    },
+                )
+            };
+            if ui
+                .add_enabled_ui(!self.builder || self.busy == 0, |ui| {
+                    style::primary(ui, next_label)
+                })
+                .inner
+                .clicked()
             {
-                if step < 2 {
+                if step < last_step {
                     self.setup = Some(step + 1);
+                } else if self.builder {
+                    self.export_installer(ui.ctx());
                 } else {
                     match self.save() {
                         Ok(()) => {
@@ -2006,6 +2452,7 @@ impl App {
                                 self.quit(ui.ctx());
                             } else {
                                 self.setup = None;
+                                self.setup_saved = None;
                                 self.engine.start();
                                 self.monitor_ready.store(true, Ordering::Relaxed);
                                 if let Some(tray) = &mut self.tray {
@@ -2030,6 +2477,9 @@ impl App {
             }
             if ui.button(tr(&lang, "Zrušit", "Cancel")).clicked() {
                 if self.monitor_ready.load(Ordering::Relaxed) {
+                    if let Some(saved) = self.setup_saved.take() {
+                        self.settings = saved;
+                    }
                     self.setup = None;
                 } else {
                     self.quit(ui.ctx());
@@ -2209,7 +2659,7 @@ impl App {
                         });
                     ui.label(tr(&lang, "Umístění", "Location"));
                     let mut path = job.file_path.clone();
-                    ui.add(style::text_field(&mut path).desired_width(f32::INFINITY));
+                    style::wrapping_field(ui, &mut path, ui.available_width(), "");
                     ui.hyperlink_to(&job.url, &job.url);
                     ui.label(model::message(&lang, &job.message));
                     ui.collapsing(
@@ -2309,12 +2759,20 @@ impl eframe::App for App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         style::caption(
                             ui,
-                            match self.engine.snapshot().settings.clipboard_mode {
-                                ClipboardMode::Off => self.t("Schránka: vypnuto", "Clipboard: off"),
-                                ClipboardMode::Selected => self
-                                    .t("Schránka: vybrané služby", "Clipboard: selected services"),
-                                ClipboardMode::All => {
-                                    self.t("Schránka: všechny weby", "Clipboard: all sites")
+                            if self.builder {
+                                self.t("Nastavení pro příjemce", "Recipient configuration")
+                            } else {
+                                match self.engine.snapshot().settings.clipboard_mode {
+                                    ClipboardMode::Off => {
+                                        self.t("Schránka: vypnuto", "Clipboard: off")
+                                    }
+                                    ClipboardMode::Selected => self.t(
+                                        "Schránka: vybrané služby",
+                                        "Clipboard: selected services",
+                                    ),
+                                    ClipboardMode::All => {
+                                        self.t("Schránka: všechny weby", "Clipboard: all sites")
+                                    }
                                 }
                             },
                         );
@@ -2357,6 +2815,120 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn form_app(data: &std::path::Path) -> App {
+        let engine = Engine::new(data, Some(Settings::default())).unwrap();
+        let state = engine.snapshot();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (_, tray_rx) = std::sync::mpsc::channel();
+        App {
+            engine,
+            settings: state.settings.clone(),
+            state,
+            page: Page::Settings,
+            preset: data.join("preset.json"),
+            data: data.into(),
+            exe: data.join("app.exe"),
+            setup: None,
+            preview: true,
+            builder: false,
+            builder_folder: "WorkFlow Media".into(),
+            install_location: crate::installer::Location::default(),
+            created_installer: None,
+            setup_saved: None,
+            links: String::new(),
+            format: "MP4".into(),
+            quality: 0,
+            destination: String::new(),
+            selected: HashSet::new(),
+            anchor: None,
+            filter: Filter::default(),
+            sort: Sort::Newest,
+            notice: String::new(),
+            busy: 0,
+            tx,
+            rx,
+            tray_rx,
+            tray: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            monitor_ready: Arc::new(AtomicBool::new(false)),
+            snapshot_at: Instant::now(),
+            show_signal: None,
+            confirm: None,
+            info: None,
+            paste_dialog: false,
+            search: String::new(),
+            search_results: vec![],
+            login: String::new(),
+            password: String::new(),
+            update: None,
+            update_file: None,
+            update_auto: false,
+            update_checked: Instant::now(),
+            quitting: false,
+            exit_ready: false,
+        }
+    }
+
+    #[test]
+    fn settings_and_builder_fields_fit_narrow_and_wide_windows_in_both_languages() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = form_app(dir.path());
+        let path = format!("C:\\Example\\{}file.txt", "long-folder-name\\".repeat(12));
+        app.settings.download_directory = path.clone();
+        app.settings.cookies_file = path.clone();
+        for lang in ["cs", "en"] {
+            app.settings.language = lang.into();
+            for width in [480., 720., 1100.] {
+                for section in 0..3 {
+                    let ctx = egui::Context::default();
+                    style::apply(&ctx);
+                    let mut bounds = egui::Rect::NOTHING;
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(width, 1400.),
+                        )),
+                        ..Default::default()
+                    };
+                    for _ in 0..2 {
+                        let output = ctx.run(input.clone(), |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                                match section {
+                                    0 => app.general_settings(ui),
+                                    1 => app.cookies_settings(ui),
+                                    _ => app.installer_locations(ui),
+                                }
+                                bounds = ui.min_rect();
+                            });
+                        });
+                        if section == 0 {
+                            for shape in output.shapes {
+                                if let egui::Shape::Text(text) = shape.shape {
+                                    if text.galley.text()
+                                        == tr(lang, "Jazyk aplikace", "Application language")
+                                    {
+                                        assert_eq!(
+                                            text.galley.rows.len(),
+                                            1,
+                                            "Language label split at {width}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    assert!(
+                        bounds.right() <= width + 1.,
+                        "section {section}, {lang}, width {width}: {bounds:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(app.settings.download_directory, path);
+        assert_eq!(app.settings.cookies_file, path);
+    }
+
     #[test]
     fn display_sort_does_not_change_queue() {
         let a = Job {

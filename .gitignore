@@ -1,6 +1,7 @@
 /target/
 /.build/
 /Standalone/
+/SetupBuilder/
 /qa/
 /resources/tools.zip
 *.session

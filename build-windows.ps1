@@ -10,7 +10,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Rust build failed' }
     New-Item -ItemType Directory -Force -Path 'Standalone' | Out-Null
     Copy-Item -LiteralPath "target\$Target\release\workflow-media.exe" -Destination 'Standalone\WorkFlow Media.exe' -Force
+    New-Item -ItemType Directory -Force -Path 'SetupBuilder' | Out-Null
+    $builderPath = Join-Path $PSScriptRoot 'SetupBuilder\WorkFlow Media Setup Builder.exe'
+    $builder = Start-Process -FilePath (Join-Path $PSScriptRoot "target\$Target\release\workflow-media.exe") -ArgumentList @('--export-builder', '--output', ('"' + $builderPath + '"')) -Wait -PassThru -WindowStyle Hidden
+    if ($builder.ExitCode -ne 0) { throw 'Setup builder export failed' }
     Get-FileHash -Algorithm SHA256 -LiteralPath 'Standalone\WorkFlow Media.exe'
+    Get-FileHash -Algorithm SHA256 -LiteralPath $builderPath
 } finally {
     $env:CARGO_ENCODED_RUSTFLAGS = $oldFlags
     Pop-Location

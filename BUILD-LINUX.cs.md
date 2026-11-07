@@ -1,5 +1,7 @@
 # Kompilace pro Linux
 
+Tento návod kompiluje hlavní aplikaci včetně průvodce nastavením. Samostatný generátor instalace vytváří Windows x64 EXE a běží pouze ve Windows. Na Ubuntu 24.04 x86-64 byly ověřeny testy a kompilace; další prostředí a architektury vyžadují vlastní ověření.
+
 Na Ubuntu 24.04 / Debianu připravte překladač a systémové knihovny:
 
 ```bash

@@ -1,5 +1,7 @@
 # Build on Linux
 
+These instructions build the main downloader, including its setup guide. The separate Setup Builder creates Windows x64 installers and runs on Windows only. Linux validation covers compilation and tests on Ubuntu 24.04 x86-64; other desktop integrations and architectures require testing on the intended system.
+
 The Rust source is shared with Windows. The Linux target is x86-64 or aarch64 according to the machine/toolchain. GTK is used for the system tray, not for the application interface.
 
 On Ubuntu 24.04 / Debian, install the compiler and desktop development libraries:

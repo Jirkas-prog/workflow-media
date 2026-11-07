@@ -11,7 +11,7 @@ cargo test --locked
 ./build-windows.ps1
 ```
 
-The result is `Standalone/WorkFlow Media.exe`. The script statically links the C runtime, removes developer source paths and embeds fonts, icon, help and license notices. It does not package or launch any media helper executables. Windows system DLLs and a working graphics driver are still required.
+The results are `Standalone/WorkFlow Media.exe` and `SetupBuilder/WorkFlow Media Setup Builder.exe`. Close an older copy before overwriting its output file. See [SETUP-BUILDER.md](SETUP-BUILDER.md) for the installer workflow. The script statically links the C runtime, removes developer source paths and embeds fonts, icon, help and license notices. It does not package or launch any media helper executables. Windows system DLLs and a working graphics driver are still required.
 
 For Linux see [BUILD-LINUX.md](BUILD-LINUX.md).
 
@@ -29,10 +29,10 @@ For an independent fork, generate a cryptographically random 32-byte private key
 For each release, increase the Cargo package version and rebuild. Copy the executable to `WorkFlow-Media-Windows-x64.exe`, then sign that exact asset:
 
 ```powershell
-& './Standalone/WorkFlow Media.exe' --sign-release --key PRIVATE_KEY_FILE --release-version 0.5.0 --file WorkFlow-Media-Windows-x64.exe --output update-windows-x86_64.json
+& './Standalone/WorkFlow Media.exe' --sign-release --key PRIVATE_KEY_FILE --release-version 0.6.0 --file WorkFlow-Media-Windows-x64.exe --output update-windows-x86_64.json
 ```
 
-Publish both files in the stable `v0.5.0` GitHub release. The manifest signs version, target, immutable release URL and SHA-256. An altered manifest or binary is refused. A failed lookup reports an error; it is not presented as a successful update check. Never replace an already published version's binary with different bytes.
+Publish both files in the stable `v0.6.0` GitHub release. Also publish the builder as `WorkFlow-Media-Setup-Builder-Windows-x64.exe` and include both EXE hashes in `SHA256SUMS.txt`. Never publish personal generated installers or profiles. The manifest signs version, target, immutable release URL and SHA-256. An altered manifest or binary is refused. A failed lookup reports an error; it is not presented as a successful update check. Never replace an already published version's binary with different bytes.
 
 Automatic checks run once per day. Installation waits for an idle queue, pauses active work on manual restart, verifies the downloaded helper again, preserves a `.previous` copy and restarts with the same data/preset locations. Do not rotate the public key without an update-key migration plan: installed clients trust their embedded key.
 

@@ -67,7 +67,7 @@ fn validate(m: &Manifest, key: &[u8; 32]) -> Result<()> {
         .context("Update signature is not valid / Podpis aktualizace není platný")?;
     Ok(())
 }
-pub fn check() -> Result<Option<Manifest>> {
+pub fn latest() -> Result<Manifest> {
     let response = client()?
         .get(format!(
             "https://github.com/{REPOSITORY}/releases/latest/download/update-{}.json",
@@ -90,6 +90,10 @@ pub fn check() -> Result<Option<Manifest>> {
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid update key"))?;
     validate(&m, &key)?;
+    Ok(m)
+}
+pub fn check() -> Result<Option<Manifest>> {
+    let m = latest()?;
     Ok((semver::Version::parse(&m.version)? > semver::Version::parse(VERSION)?).then_some(m))
 }
 pub fn download(m: &Manifest, cache: &Path) -> Result<PathBuf> {
