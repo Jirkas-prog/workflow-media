@@ -18,14 +18,20 @@ Stačí jeden EXE soubor. Při prvním otevření vás průvodce provede nastave
 - FastShare přihlášení včetně hesla se zapamatuje šifrovaně pomocí Windows DPAPI nebo linuxové klíčenky. Tlačítko **Odhlásit a zapomenout** uložené údaje odstraní. Heslo není v předvolbě vedle EXE.
 - Aktualizace z GitHub Releases se ověřují digitálním podpisem a kontrolním součtem. Lze je zapnout automaticky nebo vyvolat ručně.
 
-Stahování, spojování obrazu a zvuku i tvorba MP3 probíhají uvnitř Rust aplikace. Nepotřebuje instalovat .NET, Python, yt-dlp, FFmpeg ani Deno.
+Rozhraní, fronta, FastShare, instalátor i aktualizace zůstávají v Rustu. Média nově stahuje yt-dlp, YouTube JavaScript zpracovává Deno a spojování obrazu se zvukem a tvorbu MP3 zajišťuje FFmpeg. Windows EXE obsahuje všechny tyto nástroje. Při prvním použití je rozbalí do své datové složky; není potřeba je ručně instalovat. Kvůli přibaleným nástrojům je EXE větší.
 
-Živě bylo ověřeno YouTube MP4, MKV a MP3. Dostupnost příspěvků na dalších službách závisí na jejich aktuálních pravidlech a přihlašování. MP3 zatím nepřevádí zvuk dostupný pouze v Opusu. DRM se neobchází. Více podrobností obsahuje [anglická dokumentace](README.md).
+Živě bylo ověřeno YouTube MP4, MKV a MP3. Dostupnost příspěvků na dalších službách závisí na jejich aktuálních pravidlech a přihlašování. MP3 nyní podporuje i převod zvuku z Opusu. DRM se neobchází. Více podrobností obsahuje [anglická dokumentace](README.md).
 
 ## Instalace pro dalšího člověka
 
-Samostatný **WorkFlow Media Setup Builder** vás provede čtyřmi kroky. Zvolíte nastavení příjemce a uložíte jeden instalační EXE. Příjemce jej otevře, potvrdí správce a instalátor stáhne aktuální podepsanou aplikaci z GitHubu, uloží připravené nastavení a spustí ji. Potřebuje internet.
+Samostatný **WorkFlow Media Setup Builder** vás provede pěti kroky. Zvolíte nastavení příjemce a uložíte jeden instalační EXE. Příjemce jej otevře, potvrdí správce a instalátor stáhne aktuální podepsanou aplikaci z GitHubu, uloží připravené nastavení a spustí ji. Potřebuje internet.
 
 Výchozí umístění je **Dokumenty → WorkFlow Media**, zástupce se vytvoří na **Ploše**. Obojí lze změnit. Použijí se skutečné systémové složky příjemce, nezávisle na jeho jménu nebo přesměrování do OneDrivu. Hesla, cookies, historie ani vaše osobní soubory se nepřenášejí.
 
 Průvodce vlastní aplikace lze opět otevřít tlačítkem **Spustit průvodce znovu** nahoře v Nastavení. Souběžné stahování umožňuje 1–16 úloh. Dlouhé cesty se zalamují uvnitř polí a jejich výška roste podle obsahu.
+
+## Cookies z prohlížeče
+
+V Nastavení nebo v průvodci zapněte **Automaticky načítat cookies z prohlížeče** a vyberte Chrome, Brave, Mozilla Firefox, Edge, Chromium, Operu nebo Vivaldi. Nejdříve se v daném prohlížeči přihlaste k požadované službě. Cookies načítá yt-dlp z místního výchozího/naposledy použitého profilu při stahování. Volbu lze připravit i v generátoru instalace: přenáší se jen název prohlížeče, cookies se načtou až u příjemce.
+
+Pokud prohlížeč zamyká databázi, zavřete i jeho procesy na pozadí. Moderní ochrana Chrome, Brave nebo Edge může načtení znemožnit; aplikace to oznámí. V takovém případě použijte Firefox nebo vlastní export cookies.txt ve formátu Netscape. Přístup k soukromému či omezenému obsahu vždy závisí na příslušné službě.

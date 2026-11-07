@@ -108,6 +108,8 @@ impl RecipientFolders {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", deny_unknown_fields)]
 pub struct Choices {
+    #[serde(default)]
+    pub cookies_browser: Option<model::Browser>,
     pub language: String,
     pub parallel: usize,
     pub format: String,
@@ -136,6 +138,7 @@ impl Profile {
             download_folder: folder,
             location,
             choices: Choices {
+                cookies_browser: s.cookies_browser,
                 language: s.language.clone(),
                 parallel: s.parallel,
                 format: s.format.clone(),
@@ -166,6 +169,7 @@ impl Profile {
         }
         let c = &self.choices;
         let s = Settings {
+            cookies_browser: c.cookies_browser,
             download_directory: downloads
                 .join(&self.download_folder)
                 .to_string_lossy()
@@ -637,6 +641,7 @@ mod tests {
         let mut s = Settings::default();
         s.download_directory = "PRIVATE_ORIGINAL_PATH".into();
         s.cookies_file = "PRIVATE_COOKIE_PATH".into();
+        s.cookies_browser = Some(model::Browser::Firefox);
         s.queue_paused = true;
         s.parallel = 16;
         s.start_with_windows = true;
@@ -646,6 +651,19 @@ mod tests {
         assert!(!text.contains("CookiesFile"));
         let dir = tempfile::tempdir().unwrap();
         let resolved = p.resolve(dir.path()).unwrap();
+        assert_eq!(resolved.cookies_browser, Some(model::Browser::Firefox));
+        let mut legacy: serde_json::Value = serde_json::from_str(&text).unwrap();
+        legacy["Choices"]
+            .as_object_mut()
+            .unwrap()
+            .remove("CookiesBrowser");
+        assert!(
+            serde_json::from_value::<Profile>(legacy)
+                .unwrap()
+                .choices
+                .cookies_browser
+                .is_none()
+        );
         assert_eq!(
             Path::new(&resolved.download_directory),
             dir.path().join("Family videos")
@@ -690,12 +708,16 @@ mod tests {
         let root = dir.path().join("installed");
         let payload = dir.path().join("download.exe");
         fs::write(&payload, b"new-executable").unwrap();
-        let p = Profile::from_settings(&Settings::default(), "Videos".into(), Location::default())
-            .unwrap();
+        let choices = Settings {
+            cookies_browser: Some(model::Browser::Brave),
+            ..Settings::default()
+        };
+        let p = Profile::from_settings(&choices, "Videos".into(), Location::default()).unwrap();
         let s = p.resolve(dir.path()).unwrap();
         commit_install(&payload, &root, s.clone(), |_| Ok(())).unwrap();
         let preset: Preset = serde_json::from_slice(&fs::read(root.join(PRESET)).unwrap()).unwrap();
         assert!(preset.setup_completed);
+        assert_eq!(preset.settings.cookies_browser, Some(model::Browser::Brave));
         fs::write(root.join(APPLICATION), b"old-executable").unwrap();
         let before = fs::read(root.join(PRESET)).unwrap();
         let error =

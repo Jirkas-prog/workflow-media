@@ -19,6 +19,55 @@ pub const SOURCES: [&str; 7] = [
 ];
 pub const QUALITIES: [i32; 9] = [0, 4320, 2160, 1440, 1080, 720, 480, 360, 240];
 pub const MAX_PARALLEL: usize = 16;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Browser {
+    Chrome,
+    Brave,
+    Firefox,
+    Edge,
+    Chromium,
+    Opera,
+    Vivaldi,
+}
+impl Browser {
+    pub const ALL: [Self; 7] = [
+        Self::Chrome,
+        Self::Brave,
+        Self::Firefox,
+        Self::Edge,
+        Self::Chromium,
+        Self::Opera,
+        Self::Vivaldi,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chrome => "Google Chrome",
+            Self::Brave => "Brave",
+            Self::Firefox => "Mozilla Firefox",
+            Self::Edge => "Microsoft Edge",
+            Self::Chromium => "Chromium",
+            Self::Opera => "Opera",
+            Self::Vivaldi => "Vivaldi",
+        }
+    }
+    pub fn argument(self) -> &'static str {
+        match self {
+            Self::Chrome => "chrome",
+            Self::Brave => "brave",
+            Self::Firefox => "firefox",
+            Self::Edge => "edge",
+            Self::Chromium => "chromium",
+            Self::Opera => "opera",
+            Self::Vivaldi => "vivaldi",
+        }
+    }
+    pub fn parse(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|b| b.argument() == value)
+            .context("Unknown browser / Neznámý prohlížeč")
+    }
+}
 pub fn tr<'a>(lang: &str, cs: &'a str, en: &'a str) -> &'a str {
     if lang == "cs" { cs } else { en }
 }
@@ -143,6 +192,7 @@ pub struct Settings {
     pub format: String,
     pub quality: i32,
     pub cookies_file: String,
+    pub cookies_browser: Option<Browser>,
     pub start_on_add: bool,
     pub queue_paused: bool,
     pub start_with_windows: bool,
@@ -170,6 +220,7 @@ impl Default for Settings {
             format: "MP4".into(),
             quality: 0,
             cookies_file: String::new(),
+            cookies_browser: None,
             start_on_add: true,
             queue_paused: false,
             start_with_windows: false,
@@ -241,7 +292,10 @@ impl Settings {
         if !Path::new(&self.download_directory).is_absolute() {
             bail!("Choose an absolute destination path / Vyberte úplnou cestu cílové složky");
         }
-        if !self.cookies_file.is_empty() && !Path::new(&self.cookies_file).is_file() {
+        if self.cookies_browser.is_none()
+            && !self.cookies_file.is_empty()
+            && !Path::new(&self.cookies_file).is_file()
+        {
             bail!("Cookies file does not exist / Soubor cookies neexistuje");
         }
         Ok(())
@@ -514,6 +568,43 @@ pub fn message(lang: &str, text: &str) -> String {
 }
 /// Legacy engine errors retain both translations in logs; the UI shows one language.
 pub fn localized_error(lang: &str, text: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("could not copy") && lower.contains("cookie")
+        || lower.contains("database is locked")
+    {
+        return tr(lang,
+            "Prohlížeč zamyká cookies. Zavřete všechna jeho okna i procesy na pozadí a zkuste Obnovit. Případně v Nastavení zvolte Firefox nebo vlastní cookies.txt.",
+            "The browser has locked its cookies. Close its windows and background processes, then choose Resume. Alternatively select Firefox or your own cookies.txt in Settings.").into();
+    }
+    if lower.contains("decrypt") || lower.contains("dpapi") || lower.contains("app-bound") {
+        return tr(lang,
+            "Systémová ochrana prohlížeče nepovolila načíst cookies. V Nastavení vyberte Firefox nebo vlastní export cookies.txt. Aplikaci spouštějte pod účtem, kterému patří profil prohlížeče.",
+            "Browser encryption prevented cookie access. Select Firefox or your own cookies.txt export in Settings. Run the app under the account that owns the browser profile.").into();
+    }
+    if lower.contains("could not find") && (lower.contains("cookie") || lower.contains("browser")) {
+        return tr(lang, "Profil vybraného prohlížeče nebyl nalezen. Nejdříve v něm otevřete požadovanou službu a přihlaste se, nebo v Nastavení vyberte jiný prohlížeč.",
+            "The selected browser profile was not found. Open the service and sign in in that browser first, or select another browser in Settings.").into();
+    }
+    if lower.contains("sign in")
+        || lower.contains("login required")
+        || lower.contains("log in")
+        || lower.contains("authentication required")
+        || lower.contains("cookies-from-browser")
+    {
+        return tr(lang, "Služba vyžaduje přihlášení nebo ověření přístupu. V Nastavení zapněte cookies z prohlížeče, ve kterém jste přihlášeni, nebo vyberte vlastní cookies.txt. Poté zkuste Obnovit.",
+            "The service requires sign-in or access verification. In Settings enable cookies from a browser where you are signed in, or select your own cookies.txt. Then try Resume.").into();
+    }
+    if text.contains("Instagram") && text.contains("bot-check") {
+        return tr(lang,
+            "Instagram požaduje ověření přístupu. V Nastavení vyberte aktuální vlastní cookies.txt z přihlášeného prohlížeče a zkuste úlohu obnovit.",
+            "Instagram requires access verification. Select your own current cookies.txt from a signed-in browser in Settings, then try Resume.").into();
+    }
+    if text.contains("HTTP status client error (403 Forbidden)") || text.contains("HTTP Error 403")
+    {
+        return tr(lang,
+            "Server odmítl přenos (HTTP 403). Zkuste úlohu obnovit. Pokud služba vyžaduje přihlášení, vyberte cookies z přihlášeného prohlížeče nebo vlastní cookies.txt v Nastavení.",
+            "The server refused the transfer (HTTP 403). Try Resume. If the service requires sign-in, select browser cookies or your own cookies.txt in Settings.").into();
+    }
     let Some((en, cs)) = text.split_once(" / ") else {
         return text.to_owned();
     };
@@ -535,6 +626,42 @@ pub fn localized_error(lang: &str, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_preferences_are_backward_compatible_and_allowlisted() {
+        let legacy: Settings = serde_json::from_str(r#"{"CookiesFile":"old-export.txt"}"#).unwrap();
+        assert!(legacy.cookies_browser.is_none());
+        assert_eq!(legacy.cookies_file, "old-export.txt");
+        assert!(
+            serde_json::from_str::<Settings>(r#"{"CookiesBrowser":"chrome:private-path"}"#)
+                .is_err()
+        );
+        assert!(Browser::parse("chrome --exec anything").is_err());
+        let mut s = Settings::default();
+        s.cookies_browser = Some(Browser::Edge);
+        s.cookies_file = "missing-inactive-file.txt".into();
+        assert!(s.validate().is_ok());
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(restored.cookies_browser, Some(Browser::Edge));
+        for text in [
+            "Could not copy Chrome cookie database",
+            "Failed to decrypt with DPAPI",
+            "Sign in to confirm",
+            "could not find firefox cookies database",
+        ] {
+            assert_ne!(localized_error("cs", text), text);
+            assert_ne!(localized_error("en", text), text);
+        }
+    }
+    #[test]
+    fn access_errors_explain_next_steps_in_both_languages() {
+        let instagram = "media unavailable: bot-check — Instagram rejected the request (HTTP 403); retry with cookies";
+        assert!(localized_error("cs", instagram).contains("Nastavení"));
+        assert!(localized_error("en", instagram).contains("Settings"));
+        let denied = "HTTP status client error (403 Forbidden) for url ([URL])";
+        assert!(localized_error("cs", denied).contains("obnovit"));
+        assert!(localized_error("en", denied).contains("Resume"));
+        assert!(!localized_error("cs", denied).contains("[URL]"));
+    }
     #[test]
     fn parallel_limit_survives_reload_and_rejects_invalid_values() {
         let dir = tempfile::tempdir().unwrap();

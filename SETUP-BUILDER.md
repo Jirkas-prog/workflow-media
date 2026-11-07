@@ -10,7 +10,8 @@ Setup Builder is a separate portable Windows x64 EXE. It creates a single instal
 2. On the first page select language, download subfolder, parallel-download limit, startup, tray behavior and automatic updates for the recipient.
 3. On the second page choose automatic downloads from copied links: off, selected services, or all supported services.
 4. On the third page choose default format and quality, with optional service presets.
-5. On the final page review the summary and choose the installation and shortcut locations. Click **Create installer EXE** and save the file.
+5. On the fourth page optionally enable browser cookies and select the browser on the recipient’s computer. No actual cookies or profile paths are included.
+6. On the final page review the summary and choose the installation and shortcut locations. Click **Create installer EXE** and save the file.
 
 Creating an installer does not change the author's running application or register startup on the author's computer. Reopen the builder to prepare another configuration.
 
@@ -44,7 +45,7 @@ If the app is already running, the installer asks the recipient to quit it throu
 
 ## Included configuration
 
-Language, download subfolder, parallel downloads, startup, close-to-tray, start-on-add, clipboard mode/services, automatic updates, default format/quality, service presets, application location/subfolder and shortcut location.
+Language, download subfolder, parallel downloads, startup, close-to-tray, start-on-add, clipboard mode/services, automatic updates, browser-cookie preference, default format/quality, service presets, application location/subfolder and shortcut location.
 
 Passwords, cookies, FastShare sessions, browser profiles, media, history and the author's absolute paths are excluded. The profile contains settings, not arbitrary commands or a custom download URL. It always uses the application's compiled GitHub release channel and public verification key.
 

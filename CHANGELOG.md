@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0
+
+- Replaced the experimental native media extractors with yt-dlp for extraction, downloading, resume and post-processing. The UI, queue, FastShare, installer and updater remain Rust.
+- Windows x64 ships one EXE containing pinned, SHA-256-verified yt-dlp, Deno and FFmpeg tools; no manual runtime installation is needed. Tools are extracted to a versioned user cache on first use.
+- Added browser-cookie selection to Settings, the four-page setup guide and the five-page Setup Builder: Chrome, Brave, Firefox, Edge, Chromium, Opera and Vivaldi.
+- Generated installers transfer only the selected browser, never the author's cookies or browser profile. Cookies are read from the recipient's own profile when downloading.
+- Added process-tree cancellation, preserved partial downloads, atomic output publication without overwriting files, and English/Czech guidance for browser locks and encryption errors.
+- Updated Linux dependency instructions and third-party software notices.
+
 ## 0.6.0
 
 - Added a separate native Windows Setup Builder that creates one installer EXE containing portable recipient preferences.

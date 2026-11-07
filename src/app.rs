@@ -1623,6 +1623,14 @@ impl App {
                     ClipboardMode::Selected => self.settings.clipboard_sources.join(", "),
                 });
                 ui.end_row();
+                ui.label(tr(&lang, "Cookies z prohlížeče", "Browser cookies"));
+                ui.label(
+                    self.settings
+                        .cookies_browser
+                        .map(|b| b.label())
+                        .unwrap_or(tr(&lang, "Vypnuto", "Off")),
+                );
+                ui.end_row();
             });
         ui.add_space(14.);
         self.installer_locations(ui);
@@ -2106,6 +2114,66 @@ impl App {
                 "Cookies for signed-in services",
             ),
         );
+        let mut automatic = self.settings.cookies_browser.is_some();
+        if style::checkbox(
+            ui,
+            &mut automatic,
+            tr(
+                &lang,
+                "Automaticky načítat cookies z prohlížeče",
+                "Automatically read cookies from a browser",
+            ),
+        )
+        .changed()
+        {
+            self.settings.cookies_browser = automatic.then_some(model::Browser::Chrome);
+        }
+        if let Some(mut browser) = self.settings.cookies_browser {
+            ui.add_space(8.);
+            egui::ComboBox::from_id_salt("cookies_browser")
+                .width(240.0_f32.min(ui.available_width()))
+                .selected_text(browser.label())
+                .show_ui(ui, |ui| {
+                    for choice in model::Browser::ALL {
+                        ui.selectable_value(&mut browser, choice, choice.label());
+                    }
+                });
+            self.settings.cookies_browser = Some(browser);
+            ui.add_space(8.);
+            style::caption(
+                ui,
+                tr(
+                    &lang,
+                    "Při stahování se použije místní profil vybraného prohlížeče. V něm se nejdříve přihlaste k požadované službě. Cookies se neukládají do předvolby ani do instalátoru.",
+                    "Downloads use the selected browser’s local profile. Sign in to the service in that browser first. Cookies are never embedded in presets or installers.",
+                ),
+            );
+            ui.add_space(8.);
+            style::caption(
+                ui,
+                tr(
+                    &lang,
+                    "Pokud prohlížeč databázi zamyká, zavřete jej. Ochrana Chrome, Brave nebo Edge může načtení odmítnout; v takovém případě použijte Firefox nebo vlastní export cookies.txt.",
+                    "Close the browser if its database is locked. Chrome, Brave or Edge encryption may prevent access; in that case use Firefox or your own cookies.txt export.",
+                ),
+            );
+        }
+        if self.builder {
+            ui.add_space(12.);
+            style::caption(
+                ui,
+                tr(
+                    &lang,
+                    "Do instalátoru se uloží pouze volba prohlížeče. Jeho profil a přihlášení se použijí až na počítači příjemce. Vypnutá volba znamená stahování bez cookies.",
+                    "The installer stores only the browser choice. The recipient’s own profile and sign-in are used on their computer. When disabled, downloads use no cookies.",
+                ),
+            );
+            return;
+        }
+        if self.settings.cookies_browser.is_some() {
+            return;
+        }
+        ui.add_space(10.);
         // Reserve both buttons; the field grows vertically for long paths.
         let available = ui.available_width();
         let mut browse = false;
@@ -2304,7 +2372,7 @@ impl App {
     }
     fn wizard(&mut self, ui: &mut egui::Ui) {
         let step = self.setup.unwrap_or(0);
-        let last_step = if self.builder { 3 } else { 2 };
+        let last_step = if self.builder { 4 } else { 3 };
         let lang = self.settings.language.clone();
         ui.add_space(18.);
         ui.label(
@@ -2366,6 +2434,18 @@ impl App {
                     "Preferences are saved next to the application. You can change them at any time.",
                 ),
             ),
+            3 => (
+                tr(
+                    &lang,
+                    "Přihlášení z vašeho prohlížeče",
+                    "Sign-in from your browser",
+                ),
+                tr(
+                    &lang,
+                    "Volitelné cookies pro služby vyžadující přihlášení.",
+                    "Optional cookies for services that require sign-in.",
+                ),
+            ),
             _ => (
                 tr(&lang, "Připraveno k předání", "Ready to share"),
                 tr(
@@ -2411,6 +2491,7 @@ impl App {
                         }
                         1 => self.clipboard_settings(ui),
                         2 => self.quality_settings(ui),
+                        3 => self.cookies_settings(ui),
                         _ => self.installer_summary(ui),
                     }
                 });
@@ -2879,7 +2960,7 @@ mod tests {
         for lang in ["cs", "en"] {
             app.settings.language = lang.into();
             for width in [480., 720., 1100.] {
-                for section in 0..3 {
+                for section in 0..5 {
                     let ctx = egui::Context::default();
                     style::apply(&ctx);
                     let mut bounds = egui::Rect::NOTHING;
@@ -2897,7 +2978,15 @@ mod tests {
                                 match section {
                                     0 => app.general_settings(ui),
                                     1 => app.cookies_settings(ui),
-                                    _ => app.installer_locations(ui),
+                                    2 => app.installer_locations(ui),
+                                    _ => {
+                                        app.builder = section == 4;
+                                        app.settings.cookies_browser =
+                                            Some(model::Browser::Firefox);
+                                        app.cookies_settings(ui);
+                                        app.settings.cookies_browser = None;
+                                        app.builder = false;
+                                    }
                                 }
                                 bounds = ui.min_rect();
                             });
@@ -2929,6 +3018,57 @@ mod tests {
         assert_eq!(app.settings.cookies_file, path);
     }
 
+    #[test]
+    fn browser_page_is_available_in_both_setup_guides_and_languages() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = form_app(dir.path());
+        for lang in ["cs", "en"] {
+            for builder in [false, true] {
+                app.builder = builder;
+                app.setup = Some(3);
+                app.settings.language = lang.into();
+                app.settings.cookies_browser = Some(model::Browser::Firefox);
+                let ctx = egui::Context::default();
+                style::apply(&ctx);
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1100., 850.),
+                    )),
+                    ..Default::default()
+                };
+                let mut text = String::new();
+                for _ in 0..2 {
+                    let out = ctx.run(input.clone(), |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| app.wizard(ui));
+                    });
+                    text = out
+                        .shapes
+                        .into_iter()
+                        .filter_map(|s| {
+                            if let egui::Shape::Text(t) = s.shape {
+                                Some(t.galley.text().to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
+                assert!(text.contains("Mozilla Firefox"));
+                assert!(text.contains(tr(
+                    lang,
+                    "Automaticky načítat cookies",
+                    "Automatically read cookies"
+                )));
+                assert!(text.contains(if builder {
+                    tr(lang, "Další", "Next")
+                } else {
+                    tr(lang, "Uložit a spustit", "Save and start")
+                }));
+            }
+        }
+    }
     #[test]
     fn display_sort_does_not_change_queue() {
         let a = Job {

@@ -1,398 +1,79 @@
-//! Native extraction, HTTP transfer and media processing. No external executables.
-use crate::model::{self, Job, Settings};
+//! yt-dlp performs extraction, transfer, resume and post-processing; Rust owns the queue.
+use crate::{
+    model::{self, Job, Settings},
+    platform, process, tools,
+};
 use anyhow::{Context, Result, bail};
-use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    process::Command,
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
-use ytdown::{Format, FormatKind, MediaInfo};
 
-#[derive(Clone, Debug)]
-pub struct Media {
-    pub title: String,
-    pub id: String,
-    pub formats: Vec<Format>,
-}
 pub enum Update {
     Title(String),
     Progress { done: u64, total: u64, speed: f64 },
     Processing,
 }
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-fn runtime() -> Result<tokio::runtime::Runtime> {
-    Ok(tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()?)
+fn command(t: &tools::Tools, s: &Settings) -> Result<Command> {
+    let mut c = platform::command(&t.downloader);
+    c.args([
+        "--ignore-config",
+        "--no-playlist",
+        "--no-colors",
+        "--encoding",
+        "utf-8",
+        "--socket-timeout",
+        "20",
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
+        "--no-cache-dir",
+        "--no-js-runtimes",
+    ]);
+    c.arg("--js-runtimes")
+        .arg(format!("deno:{}", t.deno.display()));
+    c.arg("--ffmpeg-location").arg(&t.ffmpeg);
+    if let Some(browser) = s.cookies_browser {
+        c.arg("--cookies-from-browser").arg(browser.argument());
+    } else if !s.cookies_file.is_empty() {
+        c.arg("--cookies").arg(&s.cookies_file);
+    }
+    Ok(c)
 }
-fn client() -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .user_agent(UA)
-        .connect_timeout(Duration::from_secs(20))
-        .read_timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(7))
-        .build()?)
-}
-pub fn resolve(url: &str, cookies: &str, cancel: &AtomicBool) -> Result<Media> {
-    let rt = runtime()?;
-    rt.block_on(async {
-        tokio::select! {r=resolve_async(url,cookies)=>r,_=cancelled(cancel)=>bail!("@cancelled")}
-    })
-}
-async fn cancelled(cancel: &AtomicBool) {
-    while !cancel.load(Ordering::Relaxed) {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+fn selector(format: &str, quality: i32) -> Result<String> {
+    if !matches!(format, "MP4" | "MKV" | "MP3") || !model::QUALITIES.contains(&quality) {
+        bail!("Invalid format or quality / Neplatný formát nebo kvalita");
     }
-}
-async fn resolve_async(raw: &str, cookies: &str) -> Result<Media> {
-    let url = model::parse_url(raw)?;
-    let source = model::source(&url);
-    let client = client()?;
-    if matches!(source, "YouTube" | "Instagram" | "TikTok")
-        || url.host_str().is_some_and(|h| {
-            h == "x.com"
-                || h.ends_with(".twitter.com")
-                || h == "twitter.com"
-                || h == "reddit.com"
-                || h.ends_with(".reddit.com")
-        })
-    {
-        let mut builder = ytdown::Ytdown::builder().client(client.clone());
-        if !cookies.is_empty() {
-            builder = builder.cookies(ytdown::cookies::CookieJar::parse_netscape(
-                &fs::read_to_string(cookies)?,
-            )?);
-        }
-        let yt = builder.build()?;
-        let result = tokio::time::timeout(Duration::from_secs(90), yt.resolve(raw))
-            .await
-            .context("Video lookup timed out / Vyhledání videa vypršelo")??;
-        let video = match result {
-            MediaInfo::Single(v) => v,
-            MediaInfo::Collection(mut c) => {
-                let entry = c
-                    .entries
-                    .next()
-                    .await
-                    .context("Empty collection / Prázdný seznam")??;
-                match yt.resolve(&entry.url).await? {
-                    MediaInfo::Single(v) => v,
-                    _ => bail!(
-                        "Use a link to an individual video / Použijte odkaz na konkrétní video"
-                    ),
-                }
-            }
-        };
-        if video.is_live {
-            bail!(
-                "Live streams are not supported in this version / Živé přenosy tato verze nepodporuje"
-            );
-        }
-        return Ok(Media {
-            title: video.title,
-            id: video.id,
-            formats: video.formats,
-        });
-    }
-    let mut request = client.get(url.clone());
-    if !cookies.is_empty() {
-        let jar = ytdown::cookies::CookieJar::parse_netscape(&fs::read_to_string(cookies)?)?;
-        if let Some(header) = jar.header_for(
-            url.host_str().unwrap_or(""),
-            url.scheme() == "https",
-            model::now().timestamp().max(0) as u64,
-        ) {
-            request = request.header(reqwest::header::COOKIE, header);
-        }
-    }
-    let response = request.send().await?.error_for_status()?;
-    let content = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let final_url = response.url().clone();
-    if content.starts_with("video/")
-        || content.starts_with("audio/")
-        || ["mp4", "webm", "mkv", "m4a", "mp3", "wav", "flac"]
-            .iter()
-            .any(|ext| {
-                url.path()
-                    .to_ascii_lowercase()
-                    .ends_with(&format!(".{ext}"))
-            })
-    {
-        let mut f = Format::default();
-        f.url = final_url.to_string();
-        f.mime_type = Some(content.clone());
-        f.filesize = response.content_length();
-        f.container = Some(if url.path().ends_with(".webm") {
-            ytdown::Container::WebM
-        } else {
-            ytdown::Container::Mp4
-        });
-        let audio = content.starts_with("audio/")
-            || ["m4a", "mp3", "wav", "flac"]
-                .iter()
-                .any(|x| url.path().ends_with(&format!(".{x}")));
-        f.audio = Some(Default::default());
-        if !audio {
-            f.video = Some(Default::default());
-        }
-        let name = final_url
-            .path_segments()
-            .and_then(|mut s| s.next_back())
-            .unwrap_or("video")
-            .to_owned();
-        return Ok(Media {
-            title: name,
-            id: uuid::Uuid::new_v4().simple().to_string()[..10].into(),
-            formats: vec![f],
-        });
-    }
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk?;
-        if body.len() + bytes.len() > 12_000_000 {
-            bail!("Page is too large / Stránka je příliš velká");
-        }
-        body.extend_from_slice(&bytes);
-    }
-    let html = String::from_utf8_lossy(&body);
-    let mut media = extract_page(&html, &final_url)?;
-    if source == "Vimeo" {
-        let id = regex::Regex::new(r"/(\d+)")?
-            .captures(final_url.path())
-            .map(|c| c[1].to_owned());
-        if let Some(id) = id {
-            let config = client
-                .get(format!("https://player.vimeo.com/video/{id}/config"))
-                .header("Referer", final_url.as_str())
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<serde_json::Value>()
-                .await?;
-            if let Some(title) = config["video"]["title"].as_str() {
-                media.title = title.into();
-            }
-            if let Some(rows) = config["request"]["files"]["progressive"].as_array() {
-                for row in rows {
-                    if let Some(url) = row["url"].as_str() {
-                        let mut f = progressive(url, row["height"].as_u64().unwrap_or(0) as u32);
-                        f.http_headers
-                            .push(("Referer".into(), final_url.to_string()));
-                        media.formats.push(f);
-                    }
-                }
-            }
-        }
-    }
-    if media.formats.is_empty() {
-        bail!(
-            "No accessible video found. The service may require cookies or may have changed its page. / Nebylo nalezeno dostupné video. Služba může vyžadovat cookies nebo změnila stránku."
-        );
-    }
-    Ok(media)
-}
-fn progressive(url: &str, height: u32) -> Format {
-    let mut f = Format::default();
-    f.url = url.into();
-    f.container = Some(ytdown::Container::Mp4);
-    f.video = Some(Default::default());
-    f.video.as_mut().unwrap().height = (height > 0).then_some(height);
-    f.audio = Some(Default::default());
-    f
-}
-fn json_value(raw: &str) -> String {
-    serde_json::from_str::<String>(&format!("\"{raw}\""))
-        .unwrap_or_else(|_| html_escape::decode_html_entities(raw).into_owned())
-}
-pub fn extract_page(html: &str, base: &url::Url) -> Result<Media> {
-    let mut formats = Vec::new();
-    let mut title = String::from("Video");
-    if let Some(c) = regex::Regex::new(r"(?is)<title[^>]*>(.*?)</title>")?.captures(html) {
-        title = html_escape::decode_html_entities(&c[1]).trim().into();
-    }
-    // HD is a preference label, not a guaranteed resolution. Preserve source priority on ties.
-    for c in regex::Regex::new(r#"(?s)"(?:browser_native_hd_url|playable_url_quality_hd|hd_src)"\s*:\s*"((?:\\.|[^"\\])*)""#)?.captures_iter(html){formats.push(progressive(&json_value(&c[1]),0));}
-    for c in regex::Regex::new(r#"(?s)"(?:browser_native_sd_url|playable_url|sd_src|video_url)"\s*:\s*"((?:\\.|[^"\\])*)""#)?.captures_iter(html){formats.push(progressive(&json_value(&c[1]),0));}
-    for c in regex::Regex::new(
-        r#"(?s)"(?:dash_manifest|dash_manifest_xml_string)"\s*:\s*"((?:\\.|[^"\\])*)""#,
-    )?
-    .captures_iter(html)
-    {
-        formats.extend(dash_formats(&json_value(&c[1]), base)?);
-    }
-    for tag in regex::Regex::new(r"(?is)<(?:meta|source|video)\b[^>]*>")?.find_iter(html) {
-        let tag = tag.as_str();
-        let property = attribute(tag, "property");
-        if property == "og:title" {
-            title = attribute(tag, "content");
-        }
-        let raw = if property.starts_with("og:video")
-            && !property.ends_with(":type")
-            && !property.ends_with(":width")
-            && !property.ends_with(":height")
-        {
-            attribute(tag, "content")
-        } else if tag.to_lowercase().starts_with("<source")
-            || tag.to_lowercase().starts_with("<video")
-        {
-            attribute(tag, "src")
-        } else {
-            String::new()
-        };
-        if !raw.is_empty() {
-            if let Ok(url) = base.join(&raw) {
-                formats.push(progressive(url.as_str(), 0));
-            }
-        }
-    }
-    let mut seen = std::collections::HashSet::new();
-    formats.retain(|f| model::parse_url(&f.url).is_ok() && seen.insert(f.url.clone()));
-    let id = regex::Regex::new(r"\d{5,}")?
-        .find(base.path())
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| {
-            use sha2::Digest;
-            hex::encode(sha2::Sha256::digest(base.as_str()))[..10].into()
-        });
-    Ok(Media { title, id, formats })
-}
-fn attribute(tag: &str, name: &str) -> String {
-    regex::Regex::new(&format!(
-        r#"(?is)\b{}\s*=\s*["']([^"']*)["']"#,
-        regex::escape(name)
-    ))
-    .unwrap()
-    .captures(tag)
-    .map(|c| html_escape::decode_html_entities(&c[1]).into_owned())
-    .unwrap_or_default()
-}
-fn dash_formats(xml: &str, base: &url::Url) -> Result<Vec<Format>> {
-    let xml = html_escape::decode_html_entities(xml);
-    let doc = roxmltree::Document::parse(&xml)?;
-    if doc
-        .descendants()
-        .any(|n| n.has_tag_name("ContentProtection"))
-    {
-        bail!("Encrypted media is not supported / Šifrovaná média nejsou podporována");
-    }
-    let mut formats = vec![];
-    for node in doc
-        .descendants()
-        .filter(|n| n.has_tag_name("Representation"))
-    {
-        let Some(raw) = node
-            .children()
-            .find(|n| n.has_tag_name("BaseURL"))
-            .and_then(|n| n.text())
-        else {
-            continue;
-        };
-        let parent = node.parent().unwrap_or(node);
-        let attr = |key| {
-            node.attribute(key)
-                .or_else(|| parent.attribute(key))
-                .unwrap_or("")
-        };
-        let mime = attr("mimeType");
-        let mut f = Format::default();
-        f.url = base.join(raw)?.to_string();
-        f.bitrate = attr("bandwidth").parse().ok();
-        f.mime_type = Some(mime.into());
-        f.container = Some(ytdown::Container::Mp4);
-        if mime.starts_with("video") {
-            let mut v = ytdown::VideoStream::default();
-            v.height = attr("height").parse().ok();
-            v.width = attr("width").parse().ok();
-            v.codec = attr("codecs").into();
-            f.video = Some(v);
-        } else if mime.starts_with("audio") {
-            let mut a = ytdown::AudioStream::default();
-            a.codec = attr("codecs").into();
-            a.bitrate = f.bitrate;
-            f.audio = Some(a);
-        }
-        formats.push(f);
-    }
-    Ok(formats)
-}
-pub fn select(media: &Media, format: &str, quality: i32) -> Result<Vec<Format>> {
-    let height = |f: &Format| f.video.as_ref().and_then(|v| v.height).unwrap_or(0);
-    let audio_score = |f: &Format| {
-        f.audio
-            .as_ref()
-            .and_then(|a| a.bitrate)
-            .or(f.bitrate)
-            .unwrap_or(0)
-    };
     if format == "MP3" {
-        let best = media
-            .formats
-            .iter()
-            .filter(|f| {
-                f.audio.is_some()
-                    && f.audio
-                        .as_ref()
-                        .is_some_and(|a| !a.codec.to_lowercase().contains("opus"))
-            })
-            .max_by_key(|f| (f.video.is_none(), audio_score(f)))
-            .context("No decodable audio stream / Chybí podporovaný zvukový proud")?;
-        return Ok(vec![best.clone()]);
+        return Ok("ba/b".into());
     }
-    let mut videos: Vec<_> = media
-        .formats
-        .iter()
-        .filter(|f| {
-            f.video.is_some() && (quality == 0 || height(f) == 0 || height(f) <= quality as u32)
-        })
-        .collect();
-    if format == "MP4"
-        && videos
-            .iter()
-            .any(|f| matches!(f.container, Some(ytdown::Container::Mp4)))
-    {
-        videos.retain(|f| matches!(f.container, Some(ytdown::Container::Mp4)));
-    }
-    let video = videos
-        .into_iter()
-        .enumerate()
-        .max_by_key(|(index, f)| (height(f), f.bitrate.unwrap_or(0), std::cmp::Reverse(*index)))
-        .map(|(_, f)| f)
-        .context("No video at the requested quality / Video v požadované kvalitě není dostupné")?;
-    if video.kind() == FormatKind::Progressive {
-        return Ok(vec![video.clone()]);
-    }
-    let audio = media
-        .formats
-        .iter()
-        .filter(|f| f.audio.is_some() && f.video.is_none())
-        .max_by_key(|f| {
-            (
-                matches!(
-                    f.container,
-                    Some(ytdown::Container::Mp4 | ytdown::Container::M4a)
-                ),
-                audio_score(f),
-            )
-        })
-        .context("No matching audio stream / Chybí odpovídající zvukový proud")?;
-    Ok(vec![video.clone(), audio.clone()])
+    let cap = if quality > 0 {
+        format!("[height<=?{quality}]")
+    } else {
+        String::new()
+    };
+    Ok(format!("bv*{cap}+ba/b{cap}"))
 }
-#[derive(Serialize, Deserialize)]
-struct Resume {
-    url_key: String,
-    etag: String,
-    total: u64,
+pub fn inspect(url: &str, settings: &Settings, cancel: &AtomicBool) -> Result<Value> {
+    model::parse_url(url)?;
+    let t = tools::get()?;
+    let mut c = command(&t, settings)?;
+    c.args(["--dump-single-json", "--skip-download", "--", url]);
+    let mut report = None;
+    process::run(&mut c, cancel, Some(Duration::from_secs(150)), |line| {
+        if let Ok(v) = serde_json::from_str::<Value>(line) {
+            let formats: Vec<_> = v["formats"].as_array().into_iter().flatten().map(|f| serde_json::json!({"container":f["ext"], "height":f["height"], "audio":f["acodec"].as_str().is_some_and(|s|s!="none"), "bitrate":f["tbr"]})).collect();
+            // Signed media URLs and authentication headers never enter the public report.
+            report = Some(serde_json::json!({"title":v["title"], "formats":formats}));
+        }
+    })?;
+    report.context("No media metadata / Chybí údaje o videu")
 }
 pub fn download(
     job: &Job,
@@ -400,269 +81,346 @@ pub fn download(
     cancel: &AtomicBool,
     progress: impl Fn(Update) + Sync,
 ) -> Result<PathBuf> {
-    let media = resolve(&job.url, &settings.cookies_file, cancel)?;
+    model::parse_url(&job.url)?;
+    let format = selector(&job.format, job.quality)?;
+    if !Path::new(&job.directory).is_absolute() {
+        bail!("Choose an absolute download folder / Vyberte úplnou cestu ke složce stahování");
+    }
     if cancel.load(Ordering::Relaxed) {
         bail!("@cancelled");
     }
-    progress(Update::Title(media.title.clone()));
-    let selected = select(&media, &job.format, job.quality)?;
+    let t = tools::get()?;
     let dir = Path::new(&job.directory);
-    fs::create_dir_all(dir)?;
     let partial = dir
         .join(".workflow-partials")
         .join(model::safe_name(&job.id));
     fs::create_dir_all(&partial)?;
-    let runtime = runtime()?;
-    let mut files = vec![];
-    let mut prior = 0;
-    let total = selected
-        .iter()
-        .map(|f| f.filesize.unwrap_or(0))
-        .sum::<u64>();
-    for (i, f) in selected.iter().enumerate() {
-        let path = partial.join(format!("stream-{i}.media"));
-        runtime.block_on(async {tokio::select! {
-            result=async {
-                let mut attempt=0;
-                loop {
-                    match download_stream(f,&path,prior,total,cancel,&progress).await {
-                        Ok(())=>break Ok(()),
-                        Err(e) if attempt<2 && !cancel.load(Ordering::Relaxed) && e.downcast_ref::<reqwest::Error>().is_some_and(|e|e.is_timeout()||e.is_connect()||e.is_body()||e.status().is_some_and(|s|s.is_server_error()||s.as_u16()==429))=>{
-                            attempt+=1;tokio::time::sleep(Duration::from_secs(attempt*2)).await;
-                        },
-                        Err(e)=>break Err(e),
-                    }
-                }
-            }=>result,
-            _=cancelled(cancel)=>bail!("@cancelled")
-        }})?;
-        prior += fs::metadata(&path)?.len();
-        files.push(path);
+    let mut s = settings.clone();
+    // yt-dlp may update a Netscape file. Keep the user's original export unchanged.
+    let cookie_copy = if s.cookies_browser.is_none() && !s.cookies_file.is_empty() {
+        let file = tempfile::NamedTempFile::new()?;
+        fs::copy(&s.cookies_file, file.path())?;
+        s.cookies_file = file.path().to_string_lossy().into_owned();
+        Some(file)
+    } else {
+        None
+    };
+    let mut c = command(&t, &s)?;
+    c.args([
+        "--no-simulate",
+        "--no-overwrites",
+        "--continue",
+        "--no-mtime",
+        "--no-keep-video",
+        "--newline",
+        "--progress",
+        "--progress-delta",
+        "0.25",
+        "--no-write-info-json",
+        "--no-write-thumbnail",
+        "--no-write-subs",
+        "--windows-filenames",
+    ]);
+    c.args(["--match-filter", "!is_live", "-f", &format]);
+    c.arg("--paths").arg(&partial).args(["-o", "media.%(ext)s"]);
+    if job.format == "MP3" {
+        c.args(["-x", "--audio-format", "mp3", "--audio-quality", "0"]);
+    } else {
+        let ext = job.format.to_ascii_lowercase();
+        c.args(["--merge-output-format", &ext, "--remux-video", &ext]);
     }
-    drop(runtime);
+    c.args(["--print", "before_dl:WFM_TITLE:%(title)j", "--print", "post_process:WFM_PROCESS", "--print", "after_move:WFM_FILE:%(filepath)j", "--progress-template", "download:WFM_PROGRESS:%(progress.downloaded_bytes)j\t%(progress.total_bytes)j\t%(progress.total_bytes_estimate)j\t%(progress.speed)j"]);
+    c.arg("--").arg(&job.url);
+    let mut title = job.title.clone();
+    let mut output = None;
+    process::run(&mut c, cancel, None, |line| {
+        if let Some(value) = line
+            .strip_prefix("WFM_TITLE:")
+            .and_then(|s| serde_json::from_str::<String>(s).ok())
+        {
+            title = value.clone();
+            progress(Update::Title(value));
+        } else if line == "WFM_PROCESS" {
+            progress(Update::Processing);
+        } else if let Some(path) = line
+            .strip_prefix("WFM_FILE:")
+            .and_then(|s| serde_json::from_str::<String>(s).ok())
+        {
+            output = Some(PathBuf::from(path));
+        } else if let Some(p) = parse_progress(line) {
+            progress(p);
+        }
+    })?;
+    drop(cookie_copy);
     if cancel.load(Ordering::Relaxed) {
         bail!("@cancelled");
     }
+    let output = output.context("No output file; the link may be a live stream / Chybí výsledný soubor; odkaz může být živý přenos")?;
+    let output = output.canonicalize()?;
+    let expected = partial.canonicalize()?;
+    if output.parent() != Some(expected.as_path())
+        || !output.is_file()
+        || output.extension().and_then(|s| s.to_str()) != Some(&job.format.to_ascii_lowercase())
+    {
+        bail!("Invalid output path / Neplatná cesta výsledného souboru");
+    }
     progress(Update::Processing);
-    let output = partial.join(format!("result.{}", job.format.to_ascii_lowercase()));
-    if job.format == "MP3" {
-        crate::mux::mp3(&files[0], &output, cancel)?;
-    } else {
-        crate::mux::merge(&files, &output, &job.format, cancel)?;
-    }
-    let name = format!(
-        "{} [{}] {}{}.{}",
-        model::safe_name(&media.title),
-        model::safe_name(&media.id),
-        job.format,
-        if job.quality == 0 {
-            "-best".into()
-        } else {
-            format!("-{}", job.quality)
-        },
-        job.format.to_ascii_lowercase()
-    );
-    let mut target = dir.join(name);
-    if target.exists() {
-        target = dir.join(format!(
-            "{} [{}].{}",
-            model::safe_name(&media.title),
-            job.id,
-            job.format.to_ascii_lowercase()
-        ));
-    }
-    let mut dst = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&target)?;
-    let copy = (|| {
-        let mut src = fs::File::open(&output)?;
-        let mut buf = [0u8; 131072];
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                bail!("@cancelled");
-            }
-            let n = src.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            dst.write_all(&buf[..n])?;
-        }
-        dst.sync_all()?;
-        Ok(())
-    })();
-    drop(dst);
-    if let Err(e) = copy {
-        let _ = fs::remove_file(&target);
-        return Err(e);
-    }
-    for path in files {
-        let _ = fs::remove_file(path);
-    }
-    let _ = fs::remove_file(output);
+    let target = publish(
+        &output,
+        dir,
+        &title,
+        &job.format.to_ascii_lowercase(),
+        cancel,
+    )?;
+    // Only our own, canonical per-job directory is removed after a completed transfer.
+    let _ = fs::remove_dir_all(&expected);
     Ok(target)
 }
-async fn download_stream(
-    f: &Format,
-    path: &Path,
-    prior: u64,
-    total_hint: u64,
-    cancel: &AtomicBool,
-    progress: &(impl Fn(Update) + Sync),
-) -> Result<()> {
-    use sha2::Digest;
-    use tokio::io::AsyncWriteExt;
-    let client = client()?;
-    let url = model::parse_url(&f.url)?;
-    let key = hex::encode(sha2::Sha256::digest(format!(
-        "{}:{}:{:?}:{:?}",
-        url.host_str().unwrap_or(""),
-        url.path(),
-        f.itag,
-        f.filesize
-    )));
-    let meta = path.with_extension("resume.json");
-    let old = fs::read(&meta)
-        .ok()
-        .and_then(|s| serde_json::from_slice::<Resume>(&s).ok());
-    let mut offset = if old
-        .as_ref()
-        .is_some_and(|m| m.url_key == key && !m.etag.is_empty())
-    {
-        fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-    } else {
-        0
+fn parse_progress(line: &str) -> Option<Update> {
+    let values: Vec<_> = line.strip_prefix("WFM_PROGRESS:")?.split('\t').collect();
+    if values.len() != 4 {
+        return None;
+    }
+    let number = |s: &str| {
+        s.parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.)
+            .unwrap_or(0.)
     };
-    let mut request = client.get(url).header("Accept-Encoding", "identity");
-    for (k, v) in &f.http_headers {
-        request = request.header(k, v);
-    }
-    if offset > 0 {
-        request = request
-            .header("Range", format!("bytes={offset}-"))
-            .header("If-Range", &old.as_ref().unwrap().etag);
-    }
-    let response = request.send().await?;
-    if response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE
-        && offset > 0
-        && old.as_ref().is_some_and(|m| m.total == offset)
-        && response
-            .headers()
-            .get("content-range")
-            .and_then(|v| v.to_str().ok())
-            == Some(format!("bytes */{offset}").as_str())
-    {
-        let validator = response
-            .headers()
-            .get("etag")
-            .or_else(|| response.headers().get("last-modified"))
-            .and_then(|v| v.to_str().ok());
-        if validator == old.as_ref().map(|m| m.etag.as_str()) {
-            return Ok(());
-        }
-    }
-    let mut response = response.error_for_status()?;
-    if response.status().as_u16() == 206 {
-        let range = response
-            .headers()
-            .get("content-range")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if crate::engine::parse_range(range).0 != Some(offset) {
-            bail!("Invalid range response / Neplatný rozsah odpovědi");
-        }
-    } else {
-        offset = 0;
-    }
-    let total = response.content_length().map(|n| n + offset).unwrap_or(0);
-    if total > offset
-        && fs2::available_space(path.parent().unwrap()).unwrap_or(u64::MAX)
-            < total - offset + 32 * 1024 * 1024
-    {
-        bail!("Not enough disk space / Nedostatek místa na disku");
-    }
-    let etag = response
-        .headers()
-        .get("etag")
-        .or_else(|| response.headers().get("last-modified"))
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    model::save_json(
-        &meta,
-        &Resume {
-            url_key: key,
-            etag,
-            total,
-        },
-    )?;
-    let mut file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(offset > 0)
-        .truncate(offset == 0)
-        .open(path)
-        .await?;
-    let (mut done, mut last_bytes, mut last) = (offset, offset, Instant::now());
-    while let Some(chunk) = response.chunk().await? {
+    let total = number(values[1]).max(number(values[2]));
+    Some(Update::Progress {
+        done: number(values[0]) as u64,
+        total: total as u64,
+        speed: number(values[3]),
+    })
+}
+fn publish(
+    source: &Path,
+    dir: &Path,
+    title: &str,
+    extension: &str,
+    cancel: &AtomicBool,
+) -> Result<PathBuf> {
+    // Write a temporary file on the same volume, then publish without replacing another download.
+    let mut temp = tempfile::NamedTempFile::new_in(dir)?;
+    let mut input = fs::File::open(source)?;
+    let mut buf = [0; 131072];
+    loop {
         if cancel.load(Ordering::Relaxed) {
             bail!("@cancelled");
         }
-        file.write_all(&chunk).await?;
-        done += chunk.len() as u64;
-        if last.elapsed() >= Duration::from_millis(150) {
-            let speed = (done - last_bytes) as f64 / last.elapsed().as_secs_f64();
-            progress(Update::Progress {
-                done: done + prior,
-                total: total_hint.max(total + prior),
-                speed,
-            });
-            last = Instant::now();
-            last_bytes = done;
+        let n = input.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        temp.write_all(&buf[..n])?;
+    }
+    temp.as_file().sync_all()?;
+    let name = model::safe_name(title);
+    for n in 0..10000 {
+        let suffix = if n == 0 {
+            String::new()
+        } else {
+            format!(" ({n})")
+        };
+        let target = dir.join(format!("{name}{suffix}.{extension}"));
+        match temp.persist_noclobber(&target) {
+            Ok(_) => return Ok(target),
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                temp = e.file;
+            }
+            Err(e) => return Err(e.error.into()),
         }
     }
-    file.sync_all().await?;
-    if done == 0 || (total > 0 && done != total) {
-        bail!("Incomplete media transfer / Neúplný přenos média");
-    }
-    progress(Update::Progress {
-        done: done + prior,
-        total: total_hint.max(total + prior),
-        speed: 0.,
-    });
-    Ok(())
+    bail!("Too many files with the same title / Příliš mnoho souborů se stejným názvem")
 }
+pub fn convert(inputs: &[PathBuf], output: &Path, format: &str, cancel: &AtomicBool) -> Result<()> {
+    selector(format, 0)?;
+    if output.exists() {
+        bail!("Output already exists / Výsledný soubor již existuje");
+    }
+    let t = tools::get()?;
+    let mut c = platform::command(t.ffmpeg);
+    c.args(["-hide_banner", "-nostdin", "-n"]);
+    for input in inputs {
+        c.arg("-i").arg(input);
+    }
+    if format == "MP3" {
+        c.args(["-vn", "-c:a", "libmp3lame", "-q:a", "0"]);
+    } else {
+        if inputs.len() > 1 {
+            c.args(["-map", "0:v:0", "-map", "1:a:0"]);
+        }
+        c.args(["-c", "copy"]);
+    }
+    c.arg(output);
+    let result = process::run(&mut c, cancel, None, |_| {});
+    if result.is_err() {
+        let _ = fs::remove_file(output);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Browser;
     #[test]
-    fn facebook_public_fields() {
-        let h = r#"<title>Example video</title>{"browser_native_hd_url":"https:\/\/cdn.example.org\/video.mp4?a=1\u0026b=2","browser_native_sd_url":"https:\/\/cdn.example.org\/sd.mp4"}"#;
-        let m = extract_page(
-            h,
-            &url::Url::parse("https://facebook.com/watch/123456").unwrap(),
-        )
-        .unwrap();
-        assert_eq!(m.formats.len(), 2);
-        assert!(m.formats[0].url.contains("&b=2"));
+    #[ignore = "requires media tools and WFM_TEST_MEDIA pointing to a local MP4 fixture"]
+    fn real_downloader_resumes_http_range_after_cancellation() {
+        use sha2::{Digest, Sha256};
+        use std::{
+            io::{BufRead, BufReader},
+            net::TcpListener,
+            sync::{Arc, Mutex},
+        };
+        let fixture =
+            fs::read(std::env::var_os("WFM_TEST_MEDIA").expect("WFM_TEST_MEDIA")).unwrap();
+        assert!(fixture.len() > 512 * 1024);
+        let data = Arc::new(fixture);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let ranges = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = {
+            let data = data.clone();
+            let ranges = ranges.clone();
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let mut workers = Vec::new();
+                while !stop.load(Ordering::Relaxed) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(10)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(10)))
+                        .unwrap();
+                    let data = data.clone();
+                    let ranges = ranges.clone();
+                    workers.push(std::thread::spawn(move || {
+                        let mut reader = BufReader::new(stream.try_clone().unwrap());
+                        let mut first = String::new(); if reader.read_line(&mut first).is_err() { return; }
+                        let mut start = None;
+                        loop {
+                            let mut line = String::new(); if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" { break; }
+                            if let Some(range) = line.to_ascii_lowercase().strip_prefix("range: bytes=") { start = range.split('-').next().and_then(|s|s.parse::<usize>().ok()); }
+                        }
+                        let offset = start.unwrap_or(0).min(data.len());
+                        ranges.lock().unwrap().push(offset);
+                        let headers = if start.is_some() { format!("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {}-{}/{}\r\n", offset, data.len()-1, data.len()) } else { "HTTP/1.1 200 OK\r\n".into() };
+                        if write!(stream, "{headers}Content-Type: video/mp4\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", data.len()-offset).is_err() { return; }
+                        if first.starts_with("HEAD ") { return; }
+                        for chunk in data[offset..].chunks(16384) {
+                            if stream.write_all(chunk).is_err() { break; }
+                            std::thread::sleep(Duration::from_millis(8));
+                        }
+                    }));
+                }
+                for worker in workers {
+                    let _ = worker.join();
+                }
+            })
+        };
+        let root = tempfile::tempdir().unwrap();
+        let job = Job {
+            url: format!("http://{address}/fixture.mp4"),
+            directory: root.path().display().to_string(),
+            ..Job::default()
+        };
+        let cancel = AtomicBool::new(false);
+        let first = download(&job, &Settings::default(), &cancel, |p| {
+            if matches!(p, Update::Progress {done, ..} if done > 131072) {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        });
+        let second = if cancel.load(Ordering::Relaxed) {
+            cancel.store(false, Ordering::Relaxed);
+            download(&job, &Settings::default(), &cancel, |_| {})
+        } else {
+            Err(anyhow::anyhow!("No progress event received"))
+        };
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+        assert_eq!(first.unwrap_err().to_string(), "@cancelled");
+        let output = second.unwrap();
         assert_eq!(
-            select(&m, "MP4", 0).unwrap()[0]
-                .video
-                .as_ref()
-                .unwrap()
-                .height,
-            None
+            Sha256::digest(fs::read(output).unwrap()),
+            Sha256::digest(data.as_slice())
         );
-        assert!(select(&m, "MP4", 0).unwrap()[0].url.contains("/video.mp4"));
+        assert!(
+            ranges.lock().unwrap().iter().any(|offset| *offset > 0),
+            "Resume must request a nonzero HTTP range"
+        );
     }
     #[test]
-    fn encrypted_dash_refused() {
-        assert!(
-            dash_formats(
-                "<MPD><ContentProtection/></MPD>",
-                &url::Url::parse("https://example.com").unwrap()
-            )
-            .is_err()
+    fn formats_and_authentication_are_explicit_arguments() {
+        assert_eq!(
+            selector("MP4", 1080).unwrap(),
+            "bv*[height<=?1080]+ba/b[height<=?1080]"
         );
+        assert_eq!(selector("MKV", 0).unwrap(), "bv*+ba/b");
+        assert_eq!(selector("MP3", 0).unwrap(), "ba/b");
+        assert!(selector("--exec", 0).is_err());
+        let t = tools::Tools {
+            downloader: "yt-dlp".into(),
+            ffmpeg: "ffmpeg".into(),
+            deno: "deno".into(),
+        };
+        let mut s = Settings::default();
+        s.cookies_file = "export with spaces.txt".into();
+        let args: Vec<_> = command(&t, &s)
+            .unwrap()
+            .get_args()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--cookies", "export with spaces.txt"])
+        );
+        for browser in Browser::ALL {
+            s.cookies_browser = Some(browser);
+            let args: Vec<_> = command(&t, &s)
+                .unwrap()
+                .get_args()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+            assert!(
+                args.windows(2)
+                    .any(|w| w == ["--cookies-from-browser", browser.argument()])
+            );
+            assert!(!args.iter().any(|s| s == "--cookies"));
+        }
+    }
+    #[test]
+    fn structured_progress_handles_unknown_size() {
+        match parse_progress("WFM_PROGRESS:123\tnull\t456\t789.5").unwrap() {
+            Update::Progress { done, total, speed } => {
+                assert_eq!((done, total), (123, 456));
+                assert_eq!(speed, 789.5);
+            }
+            _ => panic!(),
+        }
+        assert!(parse_progress("ordinary output").is_none());
+    }
+    #[test]
+    fn completed_files_never_replace_existing_names_and_cancel_is_clean() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("input");
+        fs::write(&source, b"new").unwrap();
+        let old = root.path().join("Title.mp4");
+        fs::write(&old, b"old").unwrap();
+        let cancel = AtomicBool::new(false);
+        let target = publish(&source, root.path(), "Title", "mp4", &cancel).unwrap();
+        assert_eq!(fs::read(old).unwrap(), b"old");
+        assert_eq!(fs::read(target).unwrap(), b"new");
+        cancel.store(true, Ordering::Relaxed);
+        assert!(publish(&source, root.path(), "Cancelled", "mp4", &cancel).is_err());
+        assert!(!root.path().join("Cancelled.mp4").exists());
     }
 }

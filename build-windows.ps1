@@ -2,6 +2,8 @@ param([string]$Target = 'x86_64-pc-windows-msvc')
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
+    if ($Target -ne 'x86_64-pc-windows-msvc') { throw 'Bundled tools currently target Windows x64' }
+    & (Join-Path $PSScriptRoot 'prepare-tools.ps1')
     $cargoRoot = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE '.cargo' }
     $flags = @('-C','target-feature=+crt-static',"--remap-path-prefix=$PSScriptRoot=.","--remap-path-prefix=$cargoRoot=cargo")
     $oldFlags = $env:CARGO_ENCODED_RUSTFLAGS

@@ -10,7 +10,8 @@ Samostatný **WorkFlow Media Setup Builder.exe** připraví jeden instalační E
 2. V prvním kroku vyberte jazyk příjemce, podsložku ve Stažených, souběžná stahování, spuštění po přihlášení, chování křížku a automatické aktualizace.
 3. Ve druhém kroku nastavte automatické stahování ze schránky: vypnuté, vybrané služby, nebo všechny podporované služby.
 4. Ve třetím kroku vyberte kvalitu a formát, případně předvolby jednotlivých služeb.
-5. V posledním kroku zkontrolujte přehled a vyberte umístění aplikace i zástupce. Klikněte na **Vytvořit instalační EXE** a uložte soubor.
+5. Ve čtvrtém kroku můžete zapnout cookies z prohlížeče a vybrat prohlížeč příjemce. Cookies ani cestu k vašemu profilu instalátor neobsahuje.
+6. V posledním kroku zkontrolujte přehled a vyberte umístění aplikace i zástupce. Klikněte na **Vytvořit instalační EXE** a uložte soubor.
 
 Výchozí instalace je **Dokumenty → WorkFlow Media**, zástupce je na **Ploše**. Aplikaci lze místo Dokumentů umístit na Plochu, do Stažených nebo mezi místní aplikace uživatele. Podsložku lze přejmenovat. Zástupce lze umístit na Plochu, do Dokumentů, Stažených, nabídky Start, nebo nevytvářet.
 
@@ -32,6 +33,6 @@ Přenášejí se jen volby nastavení. **Hesla, cookies, přihlašovací relace,
 
 ## Kompilace
 
-`build-windows.ps1` vytvoří aplikaci do `Standalone` a samostatný generátor do `SetupBuilder`. Celý kód je v Rustu. Generování nevyžaduje další kompilátor ani externí skripty.
+`build-windows.ps1` vytvoří aplikaci do `Standalone` a samostatný generátor do `SetupBuilder`. Aplikace a generátor jsou v Rustu; Windows EXE navíc obsahuje nástroje yt-dlp, Deno a FFmpeg pro média. Generování nevyžaduje další kompilátor ani externí skripty.
 
 Hlavní aplikaci lze kompilovat i pro Linux podle [návodu](BUILD-LINUX.cs.md). Generátor instalačního EXE je určen pro Windows x64. Technické podrobnosti a izolované testování popisuje [anglický návod](SETUP-BUILDER.md).

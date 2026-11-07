@@ -2,13 +2,13 @@
 mod app;
 mod engine;
 mod fastshare;
-mod fragmented;
 mod installer;
 mod media;
 mod model;
-mod mux;
 mod platform;
+mod process;
 mod style;
+mod tools;
 mod tray;
 mod updater;
 use anyhow::{Context, Result, bail};
@@ -220,26 +220,26 @@ fn media_command(args: &[String]) -> Result<()> {
             .with_context(|| format!("Missing {key}"))
     };
     let cancel = std::sync::atomic::AtomicBool::new(false);
+    let settings = model::Settings {
+        cookies_file: arg("--cookies").unwrap_or_default(),
+        cookies_browser: arg("--cookies-from-browser")
+            .ok()
+            .map(|value| model::Browser::parse(&value))
+            .transpose()?,
+        ..Default::default()
+    };
     if let Ok(url) = arg("--inspect-url") {
-        let media = media::resolve(&url, &arg("--cookies").unwrap_or_default(), &cancel)?;
-        let formats:Vec<_>=media.formats.iter().map(|f|serde_json::json!({"container":f.container,"height":f.video.as_ref().and_then(|v|v.height),"audio":f.audio.is_some(),"bitrate":f.bitrate})).collect();
-        let report = serde_json::json!({"title":media.title,"formats":formats});
+        let report = media::inspect(&url, &settings, &cancel)?;
         model::save_json(Path::new(&arg("--output")?), &report)?;
         return Ok(());
     }
     if let Ok(input) = arg("--convert-media") {
         let output = PathBuf::from(arg("--output")?);
-        let format = arg("--format")?;
-        if format == "MP3" {
-            mux::mp3(Path::new(&input), &output, &cancel)?;
-        } else {
-            let mut inputs = vec![PathBuf::from(input)];
-            if let Ok(audio) = arg("--audio") {
-                inputs.push(audio.into());
-            }
-            mux::merge(&inputs, &output, &format, &cancel)?;
+        let mut inputs = vec![PathBuf::from(input)];
+        if let Ok(audio) = arg("--audio") {
+            inputs.push(audio.into());
         }
-        return Ok(());
+        return media::convert(&inputs, &output, &arg("--format")?, &cancel);
     }
     let url = arg("--download-url")?;
     let directory = arg("--directory")?;
@@ -251,10 +251,6 @@ fn media_command(args: &[String]) -> Result<()> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0),
         directory,
-        ..Default::default()
-    };
-    let settings = model::Settings {
-        cookies_file: arg("--cookies").unwrap_or_default(),
         ..Default::default()
     };
     let path = media::download(&job, &settings, &cancel, |_| {})?;

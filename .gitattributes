@@ -8,3 +8,4 @@
 vendor/** -whitespace
 assets/*LICENSE* -whitespace
 THIRD-PARTY-LICENSES.txt -whitespace
+resources/media-LICENSES.txt -whitespace

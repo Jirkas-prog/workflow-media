@@ -1,5 +1,12 @@
 use std::env;
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(bundled_tools)");
+    println!("cargo:rerun-if-changed=resources/tools.zip");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::path::Path::new("resources/tools.zip").is_file()
+    {
+        println!("cargo:rustc-cfg=bundled_tools");
+    }
     println!("cargo:rerun-if-changed=assets/workflow.ico");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut resource = winresource::WindowsResource::new();

@@ -9,7 +9,7 @@ On Ubuntu 24.04 / Debian, install the compiler and desktop development libraries
 ```bash
 sudo apt update
 sudo apt install build-essential pkg-config curl libgtk-3-dev \
-  libayatana-appindicator3-dev libxdo-dev libssl-dev libdbus-1-dev
+  libayatana-appindicator3-dev libxdo-dev libssl-dev libdbus-1-dev ffmpeg unzip
 ```
 
 Install Rust using the official instructions at [rustup.rs](https://rustup.rs/). Rust 1.95+ is required. Then, inside the source directory:
@@ -27,3 +27,15 @@ The preset is written beside the binary; put it in a writable user-owned directo
 On Wayland, background clipboard access and file-copy clipboard formats depend on compositor permissions and available clipboard utilities. Test these features on the intended desktop. A successful build does not imply every desktop integration was tested on every distribution.
 
 If build memory is limited, use `CARGO_BUILD_JOBS=2 bash build-linux.sh`. For a distribution package, build on the oldest glibc baseline you intend to support.
+
+## Media tools
+
+Linux uses separately installed `yt-dlp`, `deno` and `ffmpeg` from absolute directories on `PATH`; Windows tools are not used. Install a current yt-dlp using its [official instructions](https://github.com/yt-dlp/yt-dlp#installation) (a standalone Linux release or `pipx install "yt-dlp[default]"`) and Deno using its [official instructions](https://docs.deno.com/runtime/getting_started/installation/). FFmpeg is included in the package command above. yt-dlp needs EJS support for YouTube; the official standalone executable includes it. Verify:
+
+```bash
+yt-dlp --version
+deno --version
+ffmpeg -version
+```
+
+Directories added only to a shell profile may be absent when launching from a desktop menu or autostart. Make the same PATH available to the graphical session. Browser cookies may require an unlocked keyring. Source compilation works without these tools, but media operations report the missing dependency.
