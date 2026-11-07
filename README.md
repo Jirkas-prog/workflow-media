@@ -13,6 +13,7 @@ A Rust desktop downloader with a dark interface, a download queue and a separate
 - YouTube extraction, FastShare account/search/downloads, public Facebook and Vimeo media, and the Instagram/TikTok extractors provided by ytdown.
 - HTTP downloads, container assembly and audio encoding run inside the application. No Python, .NET, WebView, yt-dlp, FFmpeg or Deno installation is required.
 - Clipboard monitoring for selected services, autostart and a tray menu. Minimize keeps the taskbar button; closing hides to the tray.
+- One running instance per user profile: opening the EXE again restores the existing window.
 - Header menus for sorting/filtering, optional columns, file information, copy/move without overwriting, and confirmed recycle-bin deletion.
 - Signed GitHub release updates, checked manually or automatically when enabled.
 

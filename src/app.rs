@@ -99,7 +99,7 @@ pub struct App {
     stop: Arc<AtomicBool>,
     monitor_ready: Arc<AtomicBool>,
     snapshot_at: Instant,
-    signal_modified: Option<std::time::SystemTime>,
+    show_signal: Option<String>,
     confirm: Option<Confirm>,
     info: Option<Job>,
     paste_dialog: bool,
@@ -123,6 +123,7 @@ impl App {
         setup: bool,
         preview: bool,
         background: bool,
+        initial_signal: Option<String>,
     ) -> Self {
         style::apply(&cc.egui_ctx);
         let state = engine.snapshot();
@@ -170,7 +171,7 @@ impl App {
             stop: stop.clone(),
             monitor_ready: monitor_ready.clone(),
             snapshot_at: Instant::now() - Duration::from_secs(1),
-            signal_modified: None,
+            show_signal: initial_signal,
             confirm: None,
             info: None,
             paste_dialog: false,
@@ -528,13 +529,11 @@ impl App {
             if !notice.is_empty() {
                 self.notice = notice;
             }
-            let m = std::fs::metadata(self.data.join("show.signal"))
-                .ok()
-                .and_then(|m| m.modified().ok());
-            if m.is_some() && self.signal_modified.is_some() && m != self.signal_modified {
+            let signal = std::fs::read_to_string(self.data.join("show.signal")).ok();
+            if signal.is_some() && signal != self.show_signal {
                 self.show(ctx);
             }
-            self.signal_modified = m;
+            self.show_signal = signal;
         }
         if self.setup.is_none()
             && !self.preview
@@ -2082,15 +2081,6 @@ impl App {
                     });
                 }
             });
-        });
-        ui.add_space(8.);
-        style::card().show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            style::title(
-                ui,
-                tr(&lang, "Váš účet FastShare", "Your FastShare account"),
-            );
-            self.account_settings(ui);
         });
         ui.add_space(12.);
         let rows = self.search_results.clone();

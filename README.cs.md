@@ -1,5 +1,7 @@
 # WorkFlow Media
 
+Aplikace běží v jediné instanci pro daný uživatelský profil. Opětovné otevření EXE zobrazí už běžící okno, i když je schované u hodin.
+
 Samostatná aplikace v Rustu pro stahování a správu médií. Rozhraní je česky i anglicky.
 
 [Stáhnout aplikaci pro Windows](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Windows-x64.exe) · [Kompilace Linuxu](BUILD-LINUX.cs.md)

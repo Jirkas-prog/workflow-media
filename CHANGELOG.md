@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Kept FastShare account controls exclusively in Settings, giving search results more room.
+- Made single-instance activation reliable during startup: reopening the application restores the existing window, including from the tray.
+
 ## 0.5.1
 
 - Fixed restoring the Windows application after hiding it to the notification area.

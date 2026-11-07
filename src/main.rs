@@ -69,17 +69,21 @@ fn run() -> Result<()> {
         bail!("--data must be an absolute path");
     }
     fs::create_dir_all(&data)?;
+    // Read before acquiring the lock so a second launch during startup is not lost.
+    let initial_signal = fs::read_to_string(data.join("show.signal")).ok();
     let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
         .open(data.join("instance.lock"))?;
-    if fs2::FileExt::try_lock_exclusive(&lock).is_err() {
-        fs::write(data.join("show.signal"), uuid::Uuid::new_v4().to_string())?;
-        return Ok(());
+    if let Err(error) = fs2::FileExt::try_lock_exclusive(&lock) {
+        if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
+            fs::write(data.join("show.signal"), uuid::Uuid::new_v4().to_string())?;
+            return Ok(());
+        }
+        return Err(error).context("Cannot lock application instance");
     }
-    fs::write(data.join("show.signal"), uuid::Uuid::new_v4().to_string())?;
     let preset_path = arg("--preset").unwrap_or_else(|| folder.join("WorkFlow Media.preset.json"));
     // A separate application data directory protects the previous .NET version.
     if !isolated && !preview && !data.join("queue.json").exists() {
@@ -145,6 +149,7 @@ fn run() -> Result<()> {
                 setup,
                 preview,
                 background,
+                initial_signal,
             )))
         }),
     )
