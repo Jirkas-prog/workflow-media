@@ -18,6 +18,7 @@ pub const SOURCES: [&str; 7] = [
     "Web",
 ];
 pub const QUALITIES: [i32; 9] = [0, 4320, 2160, 1440, 1080, 720, 480, 360, 240];
+pub const MAX_PARALLEL: usize = 16;
 pub fn tr<'a>(lang: &str, cs: &'a str, en: &'a str) -> &'a str {
     if lang == "cs" { cs } else { en }
 }
@@ -217,8 +218,8 @@ impl Settings {
         {
             bail!("Invalid format or quality / Neplatný formát nebo kvalita");
         }
-        if !(1..=4).contains(&self.parallel) {
-            bail!("Parallel downloads: 1–4 / Souběžné úlohy: 1–4");
+        if !(1..=MAX_PARALLEL).contains(&self.parallel) {
+            bail!("Parallel downloads: 1–{MAX_PARALLEL} / Souběžné úlohy: 1–{MAX_PARALLEL}");
         }
         if self.clipboard_mode == ClipboardMode::Selected && self.clipboard_sources.is_empty() {
             bail!("Select at least one service / Vyberte alespoň jednu službu");
@@ -314,7 +315,7 @@ pub fn load_state(path: &Path) -> Result<State> {
         Ok(s)
     };
     let mut state=read(path).or_else(|_|read(&PathBuf::from(format!("{}.bak",path.display())))).context("Cannot read queue; original data preserved / Frontu nelze načíst; původní data zachována")?;
-    state.settings.parallel = state.settings.parallel.clamp(1, 4);
+    state.settings.parallel = state.settings.parallel.clamp(1, MAX_PARALLEL);
     for job in &mut state.jobs {
         job.speed = 0.;
         if job.state.active() {
@@ -534,6 +535,23 @@ pub fn localized_error(lang: &str, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn parallel_limit_survives_reload_and_rejects_invalid_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = State::default();
+        state.settings.download_directory = dir.path().to_string_lossy().into_owned();
+        for parallel in [1, 4, 8, 16] {
+            state.settings.parallel = parallel;
+            state.settings.validate().unwrap();
+            save_json(&dir.path().join("queue.json"), &state).unwrap();
+            let restored = load_state(&dir.path().join("queue.json")).unwrap();
+            assert_eq!(restored.settings.parallel, parallel);
+        }
+        for invalid in [0, 17] {
+            state.settings.parallel = invalid;
+            assert!(state.settings.validate().is_err());
+        }
+    }
     #[test]
     fn url_boundaries() {
         assert!(!is_fastshare(

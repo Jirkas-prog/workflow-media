@@ -1,9 +1,9 @@
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
 pub const BG: Color32 = Color32::from_rgb(20, 34, 43);
-pub const PANEL: Color32 = Color32::from_rgb(28, 46, 57);
-pub const LINE: Color32 = Color32::from_rgb(46, 68, 80);
+pub const PANEL: Color32 = Color32::from_rgb(31, 51, 63);
+pub const LINE: Color32 = Color32::from_rgb(55, 80, 94);
 pub const TEXT: Color32 = Color32::from_rgb(220, 235, 242);
-pub const MUTED: Color32 = Color32::from_rgb(151, 187, 203);
+pub const MUTED: Color32 = Color32::from_rgb(158, 187, 201);
 pub const LIME: Color32 = Color32::from_rgb(196, 250, 103);
 pub const BLUE: Color32 = Color32::from_rgb(126, 196, 218);
 pub const GREEN: Color32 = Color32::from_rgb(139, 211, 178);
@@ -15,10 +15,13 @@ pub fn apply(ctx: &egui::Context) {
     s.visuals.panel_fill = BG;
     s.visuals.window_fill = PANEL;
     s.visuals.extreme_bg_color = Color32::from_rgb(17, 34, 43);
+    s.visuals.text_edit_bg_color = Some(Color32::from_rgb(19, 37, 47));
     s.visuals.faint_bg_color = Color32::from_rgb(29, 50, 61);
     s.visuals.code_bg_color = BG;
-    s.visuals.selection.bg_fill = Color32::from_rgb(58, 88, 68);
-    s.visuals.selection.stroke = Stroke::new(1.0_f32, LIME);
+    s.visuals.selection.bg_fill = Color32::from_rgb(55, 81, 67);
+    s.visuals.selection.stroke = Stroke::new(1.5_f32, LIME);
+    s.visuals.text_cursor.stroke = Stroke::new(1.5_f32, LIME);
+    s.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     s.visuals.widgets.noninteractive.bg_fill = PANEL;
     s.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
     s.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, MUTED);
@@ -28,26 +31,34 @@ pub fn apply(ctx: &egui::Context) {
         &mut s.visuals.widgets.active,
         &mut s.visuals.widgets.open,
     ] {
-        w.corner_radius = egui::CornerRadius::same(7);
-        w.bg_stroke = Stroke::new(1.0_f32, LINE);
+        w.corner_radius = egui::CornerRadius::same(8);
+        w.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(65, 94, 109));
         w.fg_stroke = Stroke::new(1.0_f32, TEXT);
+        w.expansion = 0.;
     }
-    s.visuals.widgets.inactive.bg_fill = PANEL;
-    s.visuals.widgets.hovered.bg_fill = Color32::from_rgb(44, 73, 84);
-    s.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, LIME);
-    s.visuals.widgets.active.bg_fill = Color32::from_rgb(61, 86, 67);
-    s.visuals.widgets.open.bg_fill = Color32::from_rgb(41, 67, 78);
-    s.visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(35, 56, 68);
-    s.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(45, 72, 83);
-    s.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(58, 80, 62);
-    s.visuals.widgets.open.weak_bg_fill = Color32::from_rgb(36, 58, 70);
-    s.visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, LIME);
+    s.visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 64, 77);
+    s.visuals.widgets.hovered.bg_fill = Color32::from_rgb(51, 80, 94);
+    s.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, BLUE);
+    s.visuals.widgets.active.bg_fill = Color32::from_rgb(32, 57, 67);
+    s.visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, BLUE);
+    s.visuals.widgets.open.bg_fill = Color32::from_rgb(35, 59, 71);
+    s.visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, BLUE);
+    s.visuals.widgets.inactive.weak_bg_fill = s.visuals.widgets.inactive.bg_fill;
+    s.visuals.widgets.hovered.weak_bg_fill = s.visuals.widgets.hovered.bg_fill;
+    s.visuals.widgets.active.weak_bg_fill = s.visuals.widgets.active.bg_fill;
+    s.visuals.widgets.open.weak_bg_fill = s.visuals.widgets.open.bg_fill;
     s.visuals.window_corner_radius = egui::CornerRadius::same(12);
-    s.visuals.menu_corner_radius = egui::CornerRadius::same(9);
+    s.visuals.menu_corner_radius = egui::CornerRadius::same(10);
     s.visuals.window_stroke = Stroke::new(1.0_f32, LINE);
+    s.visuals.popup_shadow = egui::epaint::Shadow {
+        offset: [0, 5],
+        blur: 18,
+        spread: 1,
+        color: Color32::from_black_alpha(100),
+    };
     s.spacing.item_spacing = Vec2::new(10., 9.);
     s.spacing.button_padding = Vec2::new(14., 8.);
-    s.spacing.interact_size = Vec2::new(40., 30.);
+    s.spacing.interact_size = Vec2::new(40., 34.);
     s.spacing.combo_width = 165.;
     s.spacing.scroll = egui::style::ScrollStyle::solid();
     s.spacing.scroll.bar_width = 10.;
@@ -221,7 +232,7 @@ pub fn logo(p: &egui::Painter, c: Pos2, size: f32, color: Color32) {
 }
 pub fn card() -> egui::Frame {
     egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(28, 46, 57, 240))
+        .fill(Color32::from_rgba_unmultiplied(31, 51, 63, 246))
         .stroke(Stroke::new(1.0_f32, LINE))
         .inner_margin(18)
         .corner_radius(11)
@@ -261,13 +272,35 @@ pub fn checkbox(
     .inner
 }
 pub fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(RichText::new(label).color(BG).strong())
-            .fill(LIME)
-            .stroke(Stroke::NONE)
-            .corner_radius(8)
-            .min_size(Vec2::new(136., 38.)),
-    )
+    primary_sized(ui, label, Vec2::new(136., 38.))
+}
+pub fn primary_sized(ui: &mut egui::Ui, label: &str, size: Vec2) -> egui::Response {
+    ui.scope(|ui| {
+        let widgets = &mut ui.visuals_mut().widgets;
+        for (widget, fill) in [
+            (&mut widgets.inactive, LIME),
+            (&mut widgets.hovered, Color32::from_rgb(213, 255, 141)),
+            (&mut widgets.active, Color32::from_rgb(169, 222, 80)),
+            (&mut widgets.open, LIME),
+        ] {
+            widget.bg_fill = fill;
+            widget.weak_bg_fill = fill;
+            widget.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(223, 255, 171));
+            widget.fg_stroke = Stroke::new(1.0_f32, BG);
+        }
+        ui.add(
+            egui::Button::new(RichText::new(label).color(BG).strong())
+                .corner_radius(8)
+                .min_size(size),
+        )
+    })
+    .inner
+}
+pub fn text_field(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
+    egui::TextEdit::singleline(text).margin(Vec2::new(11., 8.))
+}
+pub fn text_area(text: &mut dyn egui::TextBuffer) -> egui::TextEdit<'_> {
+    egui::TextEdit::multiline(text).margin(Vec2::new(11., 10.))
 }
 pub fn title(ui: &mut egui::Ui, label: &str) {
     ui.label(RichText::new(label).size(18.).strong());

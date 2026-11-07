@@ -677,7 +677,7 @@ impl App {
                 });
             });
             ui.add(
-                egui::TextEdit::multiline(&mut self.links)
+                style::text_area(&mut self.links)
                     .desired_width(f32::INFINITY)
                     .desired_rows(2)
                     .hint_text(tr(
@@ -699,10 +699,7 @@ impl App {
                     style::caption(ui, tr(&lang, "Uložit do", "Save to"));
                     ui.horizontal(|ui| {
                         let width = (ui.available_width() - 205.).max(100.);
-                        ui.add_sized(
-                            [width, 32.],
-                            egui::TextEdit::singleline(&mut self.destination),
-                        );
+                        ui.add_sized([width, 32.], style::text_field(&mut self.destination));
                         if ui
                             .button("…")
                             .on_hover_text(tr(&lang, "Vybrat složku", "Choose folder"))
@@ -1279,7 +1276,7 @@ impl App {
             match id {
                 "Name" => {
                     ui.label(tr(&lang, "Název obsahuje", "Name contains"));
-                    ui.text_edit_singleline(&mut self.filter.query);
+                    ui.add(style::text_field(&mut self.filter.query));
                     if ui
                         .button(tr(&lang, "Zrušit filtr", "Clear filter"))
                         .clicked()
@@ -1514,7 +1511,7 @@ impl App {
                 ui.label(tr(&lang, "Výchozí složka", "Default folder"));
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::TextEdit::singleline(&mut self.settings.download_directory)
+                        style::text_field(&mut self.settings.download_directory)
                             .desired_width((ui.available_width() - 65.).max(150.)),
                     );
                     if ui.button("…").clicked() {
@@ -1529,9 +1526,10 @@ impl App {
                 ui.end_row();
                 ui.label(tr(&lang, "Souběžná stahování", "Parallel downloads"));
                 egui::ComboBox::from_id_salt("parallel")
+                    .height(320.)
                     .selected_text(self.settings.parallel.to_string())
                     .show_ui(ui, |ui| {
-                        for n in 1..=4 {
+                        for n in 1..=model::MAX_PARALLEL {
                             ui.selectable_value(&mut self.settings.parallel, n, n.to_string());
                         }
                     });
@@ -1624,8 +1622,7 @@ impl App {
                         for (i, source) in model::SOURCES.iter().enumerate() {
                             let mut checked =
                                 self.settings.clipboard_sources.iter().any(|s| s == source);
-                            if ui
-                                .checkbox(&mut checked, source_label(source, &lang))
+                            if style::checkbox(ui, &mut checked, source_label(source, &lang))
                                 .changed()
                             {
                                 self.settings.clipboard_sources.retain(|s| s != source);
@@ -1814,7 +1811,7 @@ impl App {
                     style::caption(ui, tr(&lang, "Uživatelské jméno", "Username"));
                     ui.add_sized(
                         [field_width, 38.],
-                        egui::TextEdit::singleline(&mut self.login)
+                        style::text_field(&mut self.login)
                             .margin(egui::vec2(10., 9.))
                             .hint_text(tr(
                                 &lang,
@@ -1827,7 +1824,7 @@ impl App {
                     style::caption(ui, tr(&lang, "Heslo", "Password"));
                     let response = ui.add_sized(
                         [field_width, 38.],
-                        egui::TextEdit::singleline(&mut self.password)
+                        style::text_field(&mut self.password)
                             .margin(egui::vec2(10., 9.))
                             .password(true)
                             .hint_text(tr(&lang, "Vaše heslo", "Your password")),
@@ -1837,15 +1834,14 @@ impl App {
                 ui.vertical(|ui| {
                     style::caption(ui, " ");
                     submit |= ui
-                        .add_enabled(
-                            self.busy == 0,
-                            egui::Button::new(
-                                RichText::new(tr(&lang, "Přihlásit", "Sign in")).color(LIME),
+                        .add_enabled_ui(self.busy == 0, |ui| {
+                            style::primary_sized(
+                                ui,
+                                tr(&lang, "Přihlásit", "Sign in"),
+                                Vec2::new(136., 38.),
                             )
-                            .min_size(Vec2::new(136., 38.))
-                            .fill(Color32::from_rgb(39, 62, 58))
-                            .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(82, 113, 83))),
-                        )
+                        })
+                        .inner
                         .clicked();
                 });
             });
@@ -1894,7 +1890,7 @@ impl App {
             style::card().show(ui,|ui|self.clipboard_settings(ui));ui.add_space(12.);
             style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Kvalita a formáty","Quality and formats"));ui.add_space(8.);self.quality_settings(ui);});ui.add_space(12.);
             style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Účet FastShare","FastShare account"));self.account_settings(ui);});ui.add_space(12.);
-            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Cookies pro přihlášené služby","Cookies for signed-in services"));ui.horizontal(|ui|{ui.add(egui::TextEdit::singleline(&mut self.settings.cookies_file).desired_width((ui.available_width()-130.).max(150.)).hint_text(tr(&lang,"Volitelný soubor cookies.txt","Optional cookies.txt file")));if ui.button("…").clicked(){if let Some(p)=rfd::FileDialog::new().add_filter("Netscape cookies",&["txt"]).pick_file(){self.settings.cookies_file=p.to_string_lossy().into();}}if ui.button(tr(&lang,"Vymazat","Clear")).clicked(){self.settings.cookies_file.clear();}});style::caption(ui,tr(&lang,"Pro videa vyžadující přihlášení použijte vlastní export cookies ve formátu Netscape. Soubor se nikam neodesílá; stahovací nástroj jej používá pro příslušné weby.","For videos that require sign-in, select your own Netscape-format cookie export. The downloader uses these cookies for the corresponding sites."));});ui.add_space(12.);
+            style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Cookies pro přihlášené služby","Cookies for signed-in services"));ui.horizontal(|ui|{ui.add(style::text_field(&mut self.settings.cookies_file).desired_width((ui.available_width()-130.).max(150.)).hint_text(tr(&lang,"Volitelný soubor cookies.txt","Optional cookies.txt file")));if ui.button("…").clicked(){if let Some(p)=rfd::FileDialog::new().add_filter("Netscape cookies",&["txt"]).pick_file(){self.settings.cookies_file=p.to_string_lossy().into();}}if ui.button(tr(&lang,"Vymazat","Clear")).clicked(){self.settings.cookies_file.clear();}});style::caption(ui,tr(&lang,"Pro videa vyžadující přihlášení použijte vlastní export cookies ve formátu Netscape. Soubor se nikam neodesílá; stahovací nástroj jej používá pro příslušné weby.","For videos that require sign-in, select your own Netscape-format cookie export. The downloader uses these cookies for the corresponding sites."));});ui.add_space(12.);
             style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Aktualizace","Updates"));self.update_settings(ui);});ui.add_space(12.);
             style::card().show(ui,|ui|{style::title(ui,tr(&lang,"Nápověda a data","Help and data"));ui.horizontal_wrapped(|ui|{if ui.button(tr(&lang,"Otevřít nápovědu","Open help")).clicked(){let path=self.data.join(if lang=="cs"{"help.cs.html"}else{"help.en.html"});let text=if lang=="cs"{include_str!("../resources/help.cs.html")}else{include_str!("../resources/help.en.html")};let result=model::atomic_write(&path,text.as_bytes()).and_then(|_|open::that(path).map_err(Into::into)).map(|_|"");self.result(result);}if ui.button(tr(&lang,"Zobrazit průvodce znovu","Show setup again")).clicked(){self.setup=Some(0);}if ui.button(tr(&lang,"Složka dat","Data folder")).clicked(){self.result(open::that(&self.data).map(|_|"").map_err(Into::into));}if ui.button(tr(&lang,"Licence nástrojů","Tool licenses")).clicked(){let path=self.data.join("THIRD-PARTY-LICENSES.txt");let result=model::atomic_write(&path,include_bytes!("../THIRD-PARTY-LICENSES.txt")).and_then(|_|open::that(path).map_err(Into::into));self.result(result.map(|_|""));}});style::caption(ui,&format!("{}: {}",tr(&lang,"Předvolba","Preset"),self.preset.display()));});ui.add_space(15.);
         });
@@ -2050,22 +2046,20 @@ impl App {
             ui.horizontal(|ui| {
                 let response = ui.add_sized(
                     [(ui.available_width() - 146.).max(150.), 42.],
-                    egui::TextEdit::singleline(&mut self.search)
+                    style::text_field(&mut self.search)
                         .margin(egui::vec2(12., 11.))
                         .hint_text(tr(&lang, "Zadejte název souboru…", "Enter a file name…")),
                 );
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if (ui
-                    .add_sized(
-                        [136., 42.],
-                        egui::Button::new(
-                            RichText::new(tr(&lang, "Hledat", "Search"))
-                                .color(style::BG)
-                                .strong(),
+                    .add_enabled_ui(self.busy == 0, |ui| {
+                        style::primary_sized(
+                            ui,
+                            tr(&lang, "Hledat", "Search"),
+                            Vec2::new(136., 42.),
                         )
-                        .fill(LIME)
-                        .stroke(egui::Stroke::NONE),
-                    )
+                    })
+                    .inner
                     .clicked()
                     || enter)
                     && self.busy == 0
@@ -2148,7 +2142,7 @@ impl App {
             .default_width(600.)
             .show(ctx, |ui| {
                 ui.add(
-                    egui::TextEdit::multiline(&mut self.links)
+                    style::text_area(&mut self.links)
                         .desired_rows(5)
                         .desired_width(f32::INFINITY),
                 );
@@ -2215,7 +2209,7 @@ impl App {
                         });
                     ui.label(tr(&lang, "Umístění", "Location"));
                     let mut path = job.file_path.clone();
-                    ui.add(egui::TextEdit::singleline(&mut path).desired_width(f32::INFINITY));
+                    ui.add(style::text_field(&mut path).desired_width(f32::INFINITY));
                     ui.hyperlink_to(&job.url, &job.url);
                     ui.label(model::message(&lang, &job.message));
                     ui.collapsing(
@@ -2226,7 +2220,7 @@ impl App {
                                 .show(ui, |ui| {
                                     let mut text = job.log.clone();
                                     ui.add(
-                                        egui::TextEdit::multiline(&mut text)
+                                        style::text_area(&mut text)
                                             .font(egui::TextStyle::Monospace)
                                             .desired_width(f32::INFINITY),
                                     );

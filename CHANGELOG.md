@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3
+
+- Increased the configurable parallel-download limit to 16, including validation and saved settings.
+- Refined text fields, buttons and dropdowns with clearer borders, consistent padding and distinct hover, focus and pressed states.
+- Preserved the existing page layout and dark WorkFlow appearance.
+
 ## 0.5.2
 
 - Kept FastShare account controls exclusively in Settings, giving search results more room.
