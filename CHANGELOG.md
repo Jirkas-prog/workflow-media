@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+- Added separate browser-cookie identities: one default profile, selected profiles in a configurable order, or all profiles from selected browsers. Settings and both setup guides include the new controls.
+- Downloads try the next profile after access/sign-in errors and stop at the first success. Unreadable profiles are skipped; network, disk and rate-limit errors do not trigger account cycling. Partial transfers are isolated by profile.
+- Added automatic cookie refresh before downloads, manual refresh, encrypted snapshots and a forget action. A failed automatic refresh preserves the previous snapshot. Expired browser logins still require signing in through the browser.
+- Setup Builder exports browser groups and refresh preferences without personal cookies, account names or profile paths. Recipient profiles are discovered locally.
+- Added eight-profile synthetic integration coverage, encrypted-cache/refresh tests, portable-installer tests and responsive EN/CZ form checks.
+
 ## 0.7.0
 
 - Replaced the experimental native media extractors with yt-dlp for extraction, downloading, resume and post-processing. The UI, queue, FastShare, installer and updater remain Rust.

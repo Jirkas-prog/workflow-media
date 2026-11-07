@@ -16,8 +16,17 @@ use std::{
 
 pub enum Update {
     Title(String),
-    Progress { done: u64, total: u64, speed: f64 },
+    Progress {
+        done: u64,
+        total: u64,
+        speed: f64,
+    },
     Processing,
+    CookieProfile {
+        index: usize,
+        total: usize,
+        label: String,
+    },
 }
 fn command(t: &tools::Tools, s: &Settings) -> Result<Command> {
     let mut c = platform::command(&t.downloader);
@@ -61,6 +70,14 @@ fn selector(format: &str, quality: i32) -> Result<String> {
     Ok(format!("bv*{cap}+ba/b{cap}"))
 }
 pub fn inspect(url: &str, settings: &Settings, cancel: &AtomicBool) -> Result<Value> {
+    crate::cookies::with_auth(
+        settings,
+        cancel,
+        |_, _, _| {},
+        |s, _| inspect_one(url, s, cancel),
+    )
+}
+fn inspect_one(url: &str, settings: &Settings, cancel: &AtomicBool) -> Result<Value> {
     model::parse_url(url)?;
     let t = tools::get()?;
     let mut c = command(&t, settings)?;
@@ -82,6 +99,26 @@ pub fn download(
     progress: impl Fn(Update) + Sync,
 ) -> Result<PathBuf> {
     model::parse_url(&job.url)?;
+    crate::cookies::with_auth(
+        settings,
+        cancel,
+        |index, total, label| {
+            progress(Update::CookieProfile {
+                index,
+                total,
+                label: label.into(),
+            })
+        },
+        |settings, identity| download_one(job, settings, identity, cancel, &progress),
+    )
+}
+fn download_one(
+    job: &Job,
+    settings: &Settings,
+    identity: &str,
+    cancel: &AtomicBool,
+    progress: &(impl Fn(Update) + Sync),
+) -> Result<PathBuf> {
     let format = selector(&job.format, job.quality)?;
     if !Path::new(&job.directory).is_absolute() {
         bail!("Choose an absolute download folder / Vyberte úplnou cestu ke složce stahování");
@@ -91,9 +128,14 @@ pub fn download(
     }
     let t = tools::get()?;
     let dir = Path::new(&job.directory);
-    let partial = dir
+    let base = dir
         .join(".workflow-partials")
         .join(model::safe_name(&job.id));
+    let partial = if identity == "default" {
+        base
+    } else {
+        base.join(identity)
+    };
     fs::create_dir_all(&partial)?;
     let mut s = settings.clone();
     // yt-dlp may update a Netscape file. Keep the user's original export unchanged.

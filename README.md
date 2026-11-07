@@ -14,7 +14,7 @@ A Rust desktop downloader with a dark interface, a download queue and a separate
 - MP4/MKV video and MP3 audio, best available quality by default, with individual service presets.
 - YouTube, Facebook, Instagram, TikTok, Vimeo and other sites supported by yt-dlp; separate Rust FastShare account/search/downloads.
 - yt-dlp handles media extraction and downloads, Deno handles YouTube JavaScript, and FFmpeg joins/converts media. Windows bundles these tools inside one EXE; no manual Python or media-tool installation is required.
-- Optional cookies from Chrome, Brave, Firefox, Edge, Chromium, Opera or Vivaldi, selected in Settings or setup. A Netscape cookies.txt export remains available.
+- Multiple cookie profiles from Chrome, Brave, Firefox, Edge, Chromium, Opera or Vivaldi, with automatic refresh and ordered account fallback. Available in Settings and both setup guides; a Netscape cookies.txt export remains available.
 - Clipboard monitoring for selected services, autostart and a tray menu. Minimize keeps the taskbar button; closing hides to the tray.
 - One running instance per user profile: opening the EXE again restores the existing window.
 - Header menus for sorting/filtering, optional columns, file information, copy/move without overwriting, and confirmed recycle-bin deletion.
@@ -44,7 +44,19 @@ MP4/MKV use the best available streams within the selected resolution cap and re
 
 ## Browser cookies
 
-Enable **Settings → Cookies for signed-in services → Automatically read cookies from a browser** and select the browser where you are signed in. This preference is also available in both setup guides. yt-dlp chooses that browser's default/recent profile on the current computer and reads it at download time. It is not exported or copied to the portable preset. The app does not ask for the browser password or elevate the downloader.
+Enable **Settings → Cookies and browser profiles → Use browser cookies**. Choose one of three modes:
+
+- **One default profile:** yt-dlp chooses the selected browser's default/recent profile.
+- **Try selected profiles in order:** click **Find profiles**, tick the accounts to use, and reorder them with the arrow buttons.
+- **Load all browser cookies:** select the browsers to search. All their discoverable profiles are used, including newly created profiles. Click the matching button to load them now, or let the first download load them.
+
+For example, six Chrome profiles and two Brave profiles remain eight separate identities. On a sign-in, private-content or access error, the downloader tries the next identity and stops at the first successful download. An unreadable profile is skipped. Cookies and partial downloads from different accounts are never merged. Network failures, disk errors, cancellation and HTTP 429 rate limits stop the attempt instead of cycling through accounts. Only accounts that actually have access can retrieve the content.
+
+**Automatically refresh profile cookies** is on by default when browser cookies are used. Snapshots are refreshed before downloads, at most once per minute per profile. When disabled, the last saved snapshot is reused; the initial load is still automatic. If automatic refresh fails, an existing snapshot remains usable. **Refresh cookies now** reports failures without replacing a good snapshot. Expired sign-ins must be renewed in the browser; the app does not renew browser logins itself.
+
+Saved snapshots use Windows DPAPI or the Linux Secret Service keyring. The downloader receives a temporary, single-profile cookie file that is removed after the attempt. Profile choices and local paths are preferences; cookie values are never placed in the portable preset. **Forget saved cookies** removes the snapshots; the next use loads them again. Disable browser cookies to stop future automatic reads. The app does not ask for the browser password or elevate the downloader.
+
+The normal setup guide has the same controls. Setup Builder offers a single default profile or **Load all browser cookies**, browser selection and automatic refresh. Generated installers transfer only those preferences and discover profiles on the recipient's computer; they never include the author's profile paths, account names or cookies.
 
 If the cookie database is locked, close the browser, including background processes. Modern Chromium-based browser encryption can prevent access even when the browser is closed. The app reports this; use Firefox or your own Netscape-format cookies.txt export instead. Selecting a browser does not guarantee access to private, region-restricted, protected or removed content. See the [yt-dlp cookie FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp).
 

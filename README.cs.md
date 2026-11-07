@@ -32,6 +32,18 @@ Průvodce vlastní aplikace lze opět otevřít tlačítkem **Spustit průvodce 
 
 ## Cookies z prohlížeče
 
-V Nastavení nebo v průvodci zapněte **Automaticky načítat cookies z prohlížeče** a vyberte Chrome, Brave, Mozilla Firefox, Edge, Chromium, Operu nebo Vivaldi. Nejdříve se v daném prohlížeči přihlaste k požadované službě. Cookies načítá yt-dlp z místního výchozího/naposledy použitého profilu při stahování. Volbu lze připravit i v generátoru instalace: přenáší se jen název prohlížeče, cookies se načtou až u příjemce.
+V **Nastavení → Cookies a profily prohlížečů** zapněte **Používat cookies z prohlížečů**. K dispozici jsou tři režimy:
+
+- **Jeden výchozí profil:** yt-dlp použije výchozí nebo naposledy použitý profil vybraného prohlížeče.
+- **Vybrané profily postupně:** tlačítkem **Vyhledat profily** najdete účty, zaškrtnete požadované a šipkami nastavíte jejich pořadí.
+- **Vytáhnout všechny cookies:** vyberete Chrome, Brave, Firefox, Edge, Chromium, Operu nebo Vivaldi. Použijí se všechny nalezené profily těchto prohlížečů, včetně nově vytvořených. Stejnojmenné tlačítko je načte hned; jinak je načte první stahování.
+
+Šest profilů Chrome a dva Brave tak zůstávají osmi samostatnými účty. Při odmítnutém přístupu nebo požadavku na přihlášení se zkusí další profil, při úspěchu zkoušení skončí. Nečitelný profil se přeskočí. Cookies ani rozpracované soubory různých účtů se neslučují. Při chybě sítě, disku, zrušení nebo limitu HTTP 429 se další účty nezkoušejí. Obsah musí být dostupný alespoň jednomu z účtů.
+
+Volba **Automaticky aktualizovat cookies profilů** obnovuje uložené kopie před stahováním, nejvýše jednou za minutu pro každý profil. Při vypnutí se používá poslední kopie; první načtení proběhne vždy automaticky. Pokud automatická obnova selže, zůstává dostupná předchozí kopie. **Obnovit cookies nyní** vypíše případné chyby a nepřepíše funkční kopii neúspěšným exportem. Vypršené přihlášení obnovte v prohlížeči, aplikace se za vás znovu nepřihlašuje.
+
+Kopie jsou chráněné pomocí Windows DPAPI nebo klíčenky Secret Service na Linuxu. Do předvolby se ukládají jen volby a místní cesty profilů, nikoli cookies. Dočasný soubor pro stahování obsahuje vždy jediný profil a po pokusu se odstraní. **Zapomenout uložené cookies** odstraní uložené kopie; další použití je načte znovu. Vypnutím cookies prohlížečů zastavíte další automatické načítání.
+
+Stejné volby jsou v běžném průvodci. Generátor instalace umožňuje jeden výchozí profil nebo **Vytáhnout všechny cookies**, výběr prohlížečů a automatickou obnovu. Přenese pouze tyto volby. Profily najde až na počítači příjemce, vaše názvy účtů, cesty ani cookies do instalačního souboru nevloží.
 
 Pokud prohlížeč zamyká databázi, zavřete i jeho procesy na pozadí. Moderní ochrana Chrome, Brave nebo Edge může načtení znemožnit; aplikace to oznámí. V takovém případě použijte Firefox nebo vlastní export cookies.txt ve formátu Netscape. Přístup k soukromému či omezenému obsahu vždy závisí na příslušné službě.

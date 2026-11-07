@@ -504,6 +504,18 @@ impl Engine {
         let path = crate::media::download(job, settings, cancel, |update| {
             self.change(&job.id, |j| match update {
                 crate::media::Update::Title(title) => j.title = title,
+                crate::media::Update::CookieProfile {
+                    index,
+                    total,
+                    label,
+                } => {
+                    j.state = JobState::Connecting;
+                    j.speed = 0.;
+                    j.downloaded = 0;
+                    j.total = 0;
+                    j.percent = 0.;
+                    j.message = format!("@cookie-profile:{index}/{total} · {label}");
+                }
                 crate::media::Update::Processing => {
                     j.state = JobState::Processing;
                     j.speed = 0.;

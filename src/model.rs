@@ -19,6 +19,40 @@ pub const SOURCES: [&str; 7] = [
 ];
 pub const QUALITIES: [i32; 9] = [0, 4320, 2160, 1440, 1080, 720, 480, 360, 240];
 pub const MAX_PARALLEL: usize = 16;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CookieMode {
+    #[default]
+    Single,
+    Selected,
+    All,
+}
+pub fn default_cookie_browsers() -> Vec<Browser> {
+    Browser::ALL.to_vec()
+}
+pub fn default_cookie_refresh() -> bool {
+    true
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct CookieProfile {
+    pub browser: Browser,
+    pub path: String,
+    pub label: String,
+    pub enabled: bool,
+}
+impl CookieProfile {
+    pub fn validate(&self) -> Result<()> {
+        if (!self.path.is_empty() && !Path::new(&self.path).is_absolute())
+            || self.path.contains(['\0', '\r', '\n'])
+            || self.path.contains("::")
+            || self.path.len() > 32768
+            || self.label.len() > 512
+        {
+            bail!("Invalid browser profile / Neplatný profil prohlížeče");
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Browser {
     Chrome,
@@ -193,6 +227,10 @@ pub struct Settings {
     pub quality: i32,
     pub cookies_file: String,
     pub cookies_browser: Option<Browser>,
+    pub cookies_mode: CookieMode,
+    pub cookies_auto_refresh: bool,
+    pub cookies_browsers: Vec<Browser>,
+    pub cookie_profiles: Vec<CookieProfile>,
     pub start_on_add: bool,
     pub queue_paused: bool,
     pub start_with_windows: bool,
@@ -221,6 +259,10 @@ impl Default for Settings {
             quality: 0,
             cookies_file: String::new(),
             cookies_browser: None,
+            cookies_mode: CookieMode::Single,
+            cookies_auto_refresh: true,
+            cookies_browsers: default_cookie_browsers(),
+            cookie_profiles: Vec::new(),
             start_on_add: true,
             queue_paused: false,
             start_with_windows: false,
@@ -235,6 +277,9 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    pub fn uses_browser_cookies(&self) -> bool {
+        self.cookies_mode != CookieMode::Single || self.cookies_browser.is_some()
+    }
     pub fn preference(&self, source: &str) -> Preference {
         if source == "FastShare" {
             return Preference {
@@ -292,7 +337,21 @@ impl Settings {
         if !Path::new(&self.download_directory).is_absolute() {
             bail!("Choose an absolute destination path / Vyberte úplnou cestu cílové složky");
         }
-        if self.cookies_browser.is_none()
+        if self.cookie_profiles.len() > 128 {
+            bail!("Too many browser profiles / Příliš mnoho profilů prohlížeče");
+        }
+        for p in &self.cookie_profiles {
+            p.validate()?;
+        }
+        if self.cookies_mode == CookieMode::All && self.cookies_browsers.is_empty() {
+            bail!("Select a browser / Vyberte prohlížeč");
+        }
+        if self.cookies_mode == CookieMode::Selected
+            && !self.cookie_profiles.iter().any(|p| p.enabled)
+        {
+            bail!("Select at least one profile / Vyberte alespoň jeden profil");
+        }
+        if !self.uses_browser_cookies()
             && !self.cookies_file.is_empty()
             && !Path::new(&self.cookies_file).is_file()
         {
@@ -534,6 +593,9 @@ pub fn bytes(mut n: f64) -> String {
     }
 }
 pub fn message(lang: &str, text: &str) -> String {
+    if let Some(profile) = text.strip_prefix("@cookie-profile:") {
+        return format!("{} {profile}", tr(lang, "Zkouším profil", "Trying profile"));
+    }
     let text = match text {
         "@interrupted" => tr(
             lang,
@@ -568,6 +630,14 @@ pub fn message(lang: &str, text: &str) -> String {
 }
 /// Legacy engine errors retain both translations in logs; the UI shows one language.
 pub fn localized_error(lang: &str, text: &str) -> String {
+    if let Some(details) = text.strip_prefix("No selected profile could access this media / Žádný vybraný profil nezískal přístup k médiu:\n") {
+        let details = details.lines().map(|line| {
+            if let Some((label, error)) = line.split_once(": ") {
+                format!("{label}: {}", localized_error(lang, error))
+            } else { line.to_owned() }
+        }).collect::<Vec<_>>().join("\n");
+        return format!("{}\n{details}", tr(lang, "Žádný vybraný profil nezískal přístup k médiu:", "No selected profile could access this media:"));
+    }
     let lower = text.to_ascii_lowercase();
     if lower.contains("could not copy") && lower.contains("cookie")
         || lower.contains("database is locked")

@@ -49,6 +49,7 @@ struct Filter {
     state: Option<JobState>,
 }
 enum Event {
+    Cookies(Result<crate::cookies::RefreshReport>, bool, bool),
     Done(Result<String>),
     Notice(Result<String>),
     Search(Result<Vec<crate::fastshare::SearchResult>>),
@@ -88,6 +89,8 @@ pub struct App {
     install_location: crate::installer::Location,
     created_installer: Option<PathBuf>,
     setup_saved: Option<Settings>,
+    cookies_busy: bool,
+    cookie_results: Vec<(String, std::result::Result<usize, String>)>,
     links: String,
     format: String,
     quality: i32,
@@ -173,6 +176,8 @@ impl App {
             install_location: crate::installer::Location::default(),
             created_installer: None,
             setup_saved: None,
+            cookies_busy: false,
+            cookie_results: Vec::new(),
             links: String::new(),
             selected: HashSet::new(),
             anchor: None,
@@ -453,6 +458,74 @@ impl App {
         }
         while let Ok(event) = self.rx.try_recv() {
             match event {
+                Event::Cookies(result, refreshed, in_setup) => {
+                    self.cookies_busy = false;
+                    self.busy = self.busy.saturating_sub(1);
+                    if self.setup.is_some() != in_setup {
+                        continue;
+                    }
+                    match result {
+                        Ok(mut report) => {
+                            if !refreshed {
+                                for found in &mut report.profiles {
+                                    if let Some(old) =
+                                        self.settings.cookie_profiles.iter().find(|old| {
+                                            crate::cookies::key(old) == crate::cookies::key(found)
+                                        })
+                                    {
+                                        found.enabled = old.enabled;
+                                    }
+                                }
+                            }
+                            // Keep the user's selected ordering and any temporarily unavailable profiles.
+                            if self.settings.cookies_mode == model::CookieMode::Selected {
+                                for old in &self.settings.cookie_profiles {
+                                    if !report
+                                        .profiles
+                                        .iter()
+                                        .any(|p| crate::cookies::key(p) == crate::cookies::key(old))
+                                    {
+                                        report.profiles.push(old.clone());
+                                    }
+                                }
+                                report.profiles.sort_by_key(|p| {
+                                    self.settings
+                                        .cookie_profiles
+                                        .iter()
+                                        .position(|old| {
+                                            crate::cookies::key(old) == crate::cookies::key(p)
+                                        })
+                                        .unwrap_or(usize::MAX)
+                                });
+                            }
+                            self.settings.cookie_profiles = report.profiles;
+                            self.cookie_results = report.results;
+                            let successes = self
+                                .cookie_results
+                                .iter()
+                                .filter(|(_, r)| r.is_ok())
+                                .count();
+                            self.notice = if refreshed {
+                                format!(
+                                    "{} {successes}/{}. {}",
+                                    self.t("Cookies načteny:", "Cookies loaded:"),
+                                    self.cookie_results.len(),
+                                    self.t(
+                                        "Volby potvrďte uložením nastavení.",
+                                        "Save settings to apply your choices."
+                                    )
+                                )
+                            } else {
+                                format!(
+                                    "{} {}",
+                                    self.t("Nalezené profily:", "Profiles found:"),
+                                    self.settings.cookie_profiles.len()
+                                )
+                            };
+                        }
+                        Err(e) => self.result(Err::<String, _>(e)),
+                    }
+                }
                 Event::Exported(result) => {
                     self.busy = self.busy.saturating_sub(1);
                     match result {
@@ -1624,12 +1697,18 @@ impl App {
                 });
                 ui.end_row();
                 ui.label(tr(&lang, "Cookies z prohlížeče", "Browser cookies"));
-                ui.label(
+                ui.label(if self.settings.cookies_mode == model::CookieMode::Single {
                     self.settings
                         .cookies_browser
                         .map(|b| b.label())
-                        .unwrap_or(tr(&lang, "Vypnuto", "Off")),
-                );
+                        .unwrap_or(tr(&lang, "Vypnuto", "Off"))
+                } else {
+                    tr(
+                        &lang,
+                        "Všechny profily vybraných prohlížečů",
+                        "All profiles in the selected browsers",
+                    )
+                });
                 ui.end_row();
             });
         ui.add_space(14.);
@@ -2104,73 +2183,323 @@ impl App {
             ),
         );
     }
+    fn load_cookie_profiles(&mut self, ctx: &egui::Context, refresh: bool) {
+        self.cookies_busy = true;
+        self.busy += 1;
+        let settings = self.settings.clone();
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        let cancel = self.stop.clone();
+        let in_setup = self.setup.is_some();
+        std::thread::spawn(move || {
+            let result = if refresh {
+                crate::cookies::refresh(&settings, &cancel)
+            } else {
+                Ok(crate::cookies::RefreshReport {
+                    profiles: crate::cookies::discover(&model::Browser::ALL),
+                    results: Vec::new(),
+                })
+            };
+            let _ = tx.send(Event::Cookies(result, refresh, in_setup));
+            ctx.request_repaint();
+        });
+    }
     fn cookies_settings(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
         style::title(
             ui,
             tr(
                 &lang,
-                "Cookies pro přihlášené služby",
-                "Cookies for signed-in services",
+                "Cookies a profily prohlížečů",
+                "Cookies and browser profiles",
             ),
         );
-        let mut automatic = self.settings.cookies_browser.is_some();
+        ui.add_enabled_ui(!self.cookies_busy, |ui| self.cookie_controls(ui));
+        if self.cookies_busy {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(tr(
+                    &lang,
+                    "Načítám profily na pozadí…",
+                    "Loading profiles in the background…",
+                ));
+            });
+        }
+    }
+    fn cookie_controls(&mut self, ui: &mut egui::Ui) {
+        use model::CookieMode;
+        let lang = self.settings.language.clone();
+        let mut enabled = self.settings.uses_browser_cookies();
         if style::checkbox(
             ui,
-            &mut automatic,
+            &mut enabled,
             tr(
                 &lang,
-                "Automaticky načítat cookies z prohlížeče",
-                "Automatically read cookies from a browser",
+                "Používat cookies z prohlížečů",
+                "Use browser cookies",
             ),
         )
         .changed()
         {
-            self.settings.cookies_browser = automatic.then_some(model::Browser::Chrome);
+            self.settings.cookies_browser = enabled.then_some(model::Browser::Chrome);
+            if !enabled {
+                self.settings.cookies_mode = CookieMode::Single;
+            }
         }
-        if let Some(mut browser) = self.settings.cookies_browser {
+        if enabled {
             ui.add_space(8.);
-            egui::ComboBox::from_id_salt("cookies_browser")
-                .width(240.0_f32.min(ui.available_width()))
-                .selected_text(browser.label())
+            let mode_label = |mode| match mode {
+                CookieMode::Single => tr(&lang, "Jeden výchozí profil", "One default profile"),
+                CookieMode::Selected => tr(
+                    &lang,
+                    "Vybrané profily postupně",
+                    "Try selected profiles in order",
+                ),
+                CookieMode::All => tr(
+                    &lang,
+                    "Vytáhnout všechny cookies",
+                    "Load all browser cookies",
+                ),
+            };
+            egui::ComboBox::from_id_salt("cookies_mode")
+                .width(300.0_f32.min(ui.available_width()))
+                .selected_text(mode_label(self.settings.cookies_mode))
                 .show_ui(ui, |ui| {
-                    for choice in model::Browser::ALL {
-                        ui.selectable_value(&mut browser, choice, choice.label());
+                    for mode in [CookieMode::Single, CookieMode::Selected, CookieMode::All] {
+                        if self.builder && mode == CookieMode::Selected {
+                            continue;
+                        }
+                        if ui
+                            .selectable_value(
+                                &mut self.settings.cookies_mode,
+                                mode,
+                                mode_label(mode),
+                            )
+                            .changed()
+                            && mode == CookieMode::Single
+                            && self.settings.cookies_browser.is_none()
+                        {
+                            self.settings.cookies_browser = Some(model::Browser::Chrome);
+                        }
                     }
                 });
-            self.settings.cookies_browser = Some(browser);
+            if self.settings.cookies_mode == CookieMode::Single {
+                let mut browser = self
+                    .settings
+                    .cookies_browser
+                    .unwrap_or(model::Browser::Chrome);
+                egui::ComboBox::from_id_salt("cookies_browser")
+                    .width(240.0_f32.min(ui.available_width()))
+                    .selected_text(browser.label())
+                    .show_ui(ui, |ui| {
+                        for choice in model::Browser::ALL {
+                            ui.selectable_value(&mut browser, choice, choice.label());
+                        }
+                    });
+                self.settings.cookies_browser = Some(browser);
+            } else if self.settings.cookies_mode == CookieMode::All {
+                ui.label(tr(
+                    &lang,
+                    "Prohledat tyto prohlížeče:",
+                    "Search these browsers:",
+                ));
+                let columns = if ui.available_width() >= 620. {
+                    3
+                } else if ui.available_width() >= 340. {
+                    2
+                } else {
+                    1
+                };
+                ui.columns(columns, |uis| {
+                    for (i, browser) in model::Browser::ALL.into_iter().enumerate() {
+                        let ui = &mut uis[i % columns];
+                        let mut selected = self.settings.cookies_browsers.contains(&browser);
+                        if style::checkbox(ui, &mut selected, browser.label()).changed() {
+                            if selected {
+                                self.settings.cookies_browsers.push(browser);
+                            } else {
+                                self.settings.cookies_browsers.retain(|b| *b != browser);
+                            }
+                        }
+                    }
+                });
+            }
+            ui.add_space(8.);
+            style::checkbox(
+                ui,
+                &mut self.settings.cookies_auto_refresh,
+                tr(
+                    &lang,
+                    "Automaticky aktualizovat cookies profilů",
+                    "Automatically refresh profile cookies",
+                ),
+            );
+            style::caption(
+                ui,
+                tr(
+                    &lang,
+                    "Obnoví cookies před stahováním, nejvýše jednou za minutu pro každý profil. Při vypnutí nebo nedostupném prohlížeči použije poslední kopii. První načtení je automatické; nové přihlášení proveďte v prohlížeči.",
+                    "Refreshes cookies before downloads, at most once per minute per profile. When disabled or the browser is unavailable, the last snapshot is used. The first load is automatic; sign in again in the browser when needed.",
+                ),
+            );
+            if self.builder {
+                ui.add_space(10.);
+                style::caption(
+                    ui,
+                    tr(
+                        &lang,
+                        "Instalátor přenese pouze režim, prohlížeče a automatické obnovování. Všechny profily vyhledá až u příjemce. Vaše cookies, názvy účtů ani cesty neobsahuje.",
+                        "The installer includes only the mode, browsers and refresh preference. Profiles are discovered on the recipient’s computer. Your cookies, account names and paths are excluded.",
+                    ),
+                );
+            } else {
+                ui.add_space(10.);
+                ui.horizontal_wrapped(|ui| {
+                    if self.settings.cookies_mode == CookieMode::Selected
+                        && ui
+                            .button(tr(&lang, "Vyhledat profily", "Find profiles"))
+                            .clicked()
+                    {
+                        self.load_cookie_profiles(ui.ctx(), false);
+                    }
+                    if ui
+                        .button(if self.settings.cookies_mode == CookieMode::All {
+                            tr(
+                                &lang,
+                                "Vytáhnout všechny cookies",
+                                "Load all browser cookies",
+                            )
+                        } else {
+                            tr(&lang, "Obnovit cookies nyní", "Refresh cookies now")
+                        })
+                        .clicked()
+                    {
+                        self.load_cookie_profiles(ui.ctx(), true);
+                    }
+                    if ui
+                        .button(tr(
+                            &lang,
+                            "Zapomenout uložené cookies",
+                            "Forget saved cookies",
+                        ))
+                        .clicked()
+                    {
+                        let lang = lang.clone();
+                        self.spawn(ui.ctx(), move || {
+                            crate::cookies::forget()?;
+                            Ok(tr(
+                                &lang,
+                                "Uložené cookies odstraněny. První další použití je načte znovu.",
+                                "Saved cookies removed. They will be loaded again on the next use.",
+                            )
+                            .into())
+                        });
+                        self.cookie_results.clear();
+                    }
+                });
+                if self.settings.cookies_mode != CookieMode::Single {
+                    let selected = self.settings.cookies_mode == CookieMode::Selected;
+                    let mut move_row = None;
+                    for i in 0..self.settings.cookie_profiles.len() {
+                        let profile = &mut self.settings.cookie_profiles[i];
+                        if !selected && !self.settings.cookies_browsers.contains(&profile.browser) {
+                            continue;
+                        }
+                        ui.push_id(i, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                if selected {
+                                    if ui
+                                        .small_button("↑")
+                                        .on_hover_text(tr(&lang, "Zkusit dříve", "Try earlier"))
+                                        .clicked()
+                                        && i > 0
+                                    {
+                                        move_row = Some((i, i - 1));
+                                    }
+                                    if ui
+                                        .small_button("↓")
+                                        .on_hover_text(tr(&lang, "Zkusit později", "Try later"))
+                                        .clicked()
+                                    {
+                                        move_row = Some((i, i + 1));
+                                    }
+                                    style::checkbox(ui, &mut profile.enabled, &profile.label);
+                                } else {
+                                    ui.add(egui::Label::new(&profile.label).wrap());
+                                }
+                            });
+                            if let Some((_, result)) = self
+                                .cookie_results
+                                .iter()
+                                .find(|(id, _)| *id == crate::cookies::key(profile))
+                            {
+                                match result {
+                                    Ok(count) => {
+                                        ui.colored_label(
+                                            GREEN,
+                                            format!(
+                                                "{}: {count}",
+                                                tr(&lang, "Načtené cookies", "Cookies loaded")
+                                            ),
+                                        );
+                                    }
+                                    Err(error) => {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(model::localized_error(&lang, error))
+                                                    .color(RED),
+                                            )
+                                            .wrap(),
+                                        );
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    if let Some((a, b)) = move_row {
+                        if b < self.settings.cookie_profiles.len() {
+                            self.settings.cookie_profiles.swap(a, b);
+                        }
+                    }
+                    style::caption(
+                        ui,
+                        tr(
+                            &lang,
+                            "Každý účet se zkouší samostatně. Při odmítnutí přístupu aplikace přejde na další profil a po úspěchu skončí. Cookies různých účtů se neslučují.",
+                            "Each account is tried separately. Access failures move to the next profile; success ends the search. Cookies from different accounts are never merged.",
+                        ),
+                    );
+                } else if let Some((_, result)) = self.cookie_results.first() {
+                    match result {
+                        Ok(n) => {
+                            ui.colored_label(
+                                GREEN,
+                                format!("{}: {n}", tr(&lang, "Načtené cookies", "Cookies loaded")),
+                            );
+                        }
+                        Err(e) => {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(model::localized_error(&lang, e)).color(RED),
+                                )
+                                .wrap(),
+                            );
+                        }
+                    }
+                }
+            }
             ui.add_space(8.);
             style::caption(
                 ui,
                 tr(
                     &lang,
-                    "Při stahování se použije místní profil vybraného prohlížeče. V něm se nejdříve přihlaste k požadované službě. Cookies se neukládají do předvolby ani do instalátoru.",
-                    "Downloads use the selected browser’s local profile. Sign in to the service in that browser first. Cookies are never embedded in presets or installers.",
-                ),
-            );
-            ui.add_space(8.);
-            style::caption(
-                ui,
-                tr(
-                    &lang,
-                    "Pokud prohlížeč databázi zamyká, zavřete jej. Ochrana Chrome, Brave nebo Edge může načtení odmítnout; v takovém případě použijte Firefox nebo vlastní export cookies.txt.",
-                    "Close the browser if its database is locked. Chrome, Brave or Edge encryption may prevent access; in that case use Firefox or your own cookies.txt export.",
-                ),
-            );
-        }
-        if self.builder {
-            ui.add_space(12.);
-            style::caption(
-                ui,
-                tr(
-                    &lang,
-                    "Do instalátoru se uloží pouze volba prohlížeče. Jeho profil a přihlášení se použijí až na počítači příjemce. Vypnutá volba znamená stahování bez cookies.",
-                    "The installer stores only the browser choice. The recipient’s own profile and sign-in are used on their computer. When disabled, downloads use no cookies.",
+                    "Uložené kopie chrání Windows nebo systémová klíčenka Linuxu. Pokud prohlížeč cookies zamyká, zavřete jej. Šifrování Chrome/Brave/Edge může přístup blokovat i nadále; podporovaný profil nebo vlastní cookies.txt zůstává alternativou.",
+                    "Snapshots use Windows protection or the Linux keyring. Close the browser if cookies are locked. Chrome/Brave/Edge encryption may still block access; use an accessible profile or your own cookies.txt instead.",
                 ),
             );
             return;
         }
-        if self.settings.cookies_browser.is_some() {
+        if self.builder {
             return;
         }
         ui.add_space(10.);
@@ -2916,6 +3245,8 @@ mod tests {
             install_location: crate::installer::Location::default(),
             created_installer: None,
             setup_saved: None,
+            cookies_busy: false,
+            cookie_results: Vec::new(),
             links: String::new(),
             format: "MP4".into(),
             quality: 0,
@@ -3027,7 +3358,7 @@ mod tests {
                 app.builder = builder;
                 app.setup = Some(3);
                 app.settings.language = lang.into();
-                app.settings.cookies_browser = Some(model::Browser::Firefox);
+                app.settings.cookies_mode = model::CookieMode::All;
                 let ctx = egui::Context::default();
                 style::apply(&ctx);
                 let input = egui::RawInput {
@@ -3056,16 +3387,74 @@ mod tests {
                         .join("\n");
                 }
                 assert!(text.contains("Mozilla Firefox"));
+                assert!(text.contains(tr(lang, "Používat cookies", "Use browser cookies")));
                 assert!(text.contains(tr(
                     lang,
-                    "Automaticky načítat cookies",
-                    "Automatically read cookies"
+                    "Vytáhnout všechny cookies",
+                    "Load all browser cookies"
+                )));
+                assert!(text.contains(tr(
+                    lang,
+                    "Automaticky aktualizovat cookies profilů",
+                    "Automatically refresh profile cookies"
                 )));
                 assert!(text.contains(if builder {
                     tr(lang, "Další", "Next")
                 } else {
                     tr(lang, "Uložit a spustit", "Save and start")
                 }));
+            }
+        }
+    }
+    #[test]
+    fn eight_profile_controls_fit_without_horizontal_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = form_app(dir.path());
+        app.settings.cookie_profiles = (0..8)
+            .map(|i| model::CookieProfile {
+                browser: if i < 6 {
+                    model::Browser::Chrome
+                } else {
+                    model::Browser::Brave
+                },
+                path: dir
+                    .path()
+                    .join(format!("Profile {i}"))
+                    .display()
+                    .to_string(),
+                label: format!("Account {i} · {}", "long-profile-name-".repeat(4)),
+                enabled: true,
+            })
+            .collect();
+        for lang in ["cs", "en"] {
+            app.settings.language = lang.into();
+            for width in [480., 720., 1100.] {
+                for mode in [model::CookieMode::Selected, model::CookieMode::All] {
+                    app.settings.cookies_mode = mode;
+                    let ctx = egui::Context::default();
+                    style::apply(&ctx);
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(width, 2200.),
+                        )),
+                        ..Default::default()
+                    };
+                    let mut bounds = egui::Rect::NOTHING;
+                    for _ in 0..2 {
+                        let _ = ctx.run(input.clone(), |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                                app.cookies_settings(ui);
+                                bounds = ui.min_rect();
+                            });
+                        });
+                    }
+                    assert!(
+                        bounds.right() <= width + 1.,
+                        "{mode:?}, {lang}, {width}: {bounds:?}"
+                    );
+                }
             }
         }
     }

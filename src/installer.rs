@@ -109,6 +109,12 @@ impl RecipientFolders {
 #[serde(rename_all = "PascalCase", deny_unknown_fields)]
 pub struct Choices {
     #[serde(default)]
+    pub cookies_mode: model::CookieMode,
+    #[serde(default = "model::default_cookie_refresh")]
+    pub cookies_auto_refresh: bool,
+    #[serde(default = "model::default_cookie_browsers")]
+    pub cookies_browsers: Vec<model::Browser>,
+    #[serde(default)]
     pub cookies_browser: Option<model::Browser>,
     pub language: String,
     pub parallel: usize,
@@ -139,6 +145,23 @@ impl Profile {
             location,
             choices: Choices {
                 cookies_browser: s.cookies_browser,
+                cookies_mode: if s.cookies_mode == model::CookieMode::Selected {
+                    model::CookieMode::All
+                } else {
+                    s.cookies_mode
+                },
+                cookies_auto_refresh: s.cookies_auto_refresh,
+                cookies_browsers: if s.cookies_mode == model::CookieMode::Selected {
+                    let mut browsers = Vec::new();
+                    for p in s.cookie_profiles.iter().filter(|p| p.enabled) {
+                        if !browsers.contains(&p.browser) {
+                            browsers.push(p.browser);
+                        }
+                    }
+                    browsers
+                } else {
+                    s.cookies_browsers.clone()
+                },
                 language: s.language.clone(),
                 parallel: s.parallel,
                 format: s.format.clone(),
@@ -168,8 +191,16 @@ impl Profile {
             bail!("Invalid recipient folder / Neplatná složka příjemce");
         }
         let c = &self.choices;
+        if c.cookies_mode == model::CookieMode::Selected {
+            bail!(
+                "Installer profiles must use portable browser choices / Instalační profily musí používat přenositelné volby prohlížečů"
+            );
+        }
         let s = Settings {
             cookies_browser: c.cookies_browser,
+            cookies_mode: c.cookies_mode,
+            cookies_auto_refresh: c.cookies_auto_refresh,
+            cookies_browsers: c.cookies_browsers.clone(),
             download_directory: downloads
                 .join(&self.download_folder)
                 .to_string_lossy()
@@ -313,6 +344,7 @@ fn commit_install(
         let old: Preset = serde_json::from_slice(bytes)
             .context("Existing preset is unreadable; installation left unchanged")?;
         settings.cookies_file = old.settings.cookies_file;
+        settings.cookie_profiles = old.settings.cookie_profiles;
         settings.hidden_columns = old.settings.hidden_columns;
     }
     let mut stage = tempfile::NamedTempFile::new_in(root)?;
@@ -676,6 +708,60 @@ mod tests {
             invalid.download_folder = folder.into();
             assert!(invalid.resolve(dir.path()).is_err());
         }
+    }
+    #[test]
+    fn multiple_browser_preferences_are_portable_and_legacy_profiles_still_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = Settings {
+            cookies_mode: model::CookieMode::Selected,
+            cookies_auto_refresh: false,
+            cookie_profiles: [
+                model::Browser::Chrome,
+                model::Browser::Brave,
+                model::Browser::Chrome,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(n, browser)| model::CookieProfile {
+                browser,
+                path: dir
+                    .path()
+                    .join(format!("PRIVATE_{n}"))
+                    .display()
+                    .to_string(),
+                label: format!("PRIVATE_account_{n}"),
+                enabled: true,
+            })
+            .collect(),
+            ..Settings::default()
+        };
+        settings.cookie_profiles.push(model::CookieProfile {
+            browser: model::Browser::Firefox,
+            path: "PRIVATE_DISABLED".into(),
+            label: "PRIVATE_DISABLED".into(),
+            enabled: false,
+        });
+        let exported =
+            Profile::from_settings(&settings, "Media".into(), Location::default()).unwrap();
+        let text = serde_json::to_string(&exported).unwrap();
+        assert!(!text.contains("PRIVATE"));
+        assert!(!text.contains("CookieProfiles"));
+        let loaded = exported.resolve(dir.path()).unwrap();
+        assert_eq!(loaded.cookies_mode, model::CookieMode::All);
+        assert_eq!(
+            loaded.cookies_browsers,
+            vec![model::Browser::Chrome, model::Browser::Brave]
+        );
+        assert!(!loaded.cookies_auto_refresh);
+        assert!(loaded.cookie_profiles.is_empty());
+        let mut legacy = serde_json::to_value(exported).unwrap();
+        for key in ["CookiesMode", "CookiesAutoRefresh", "CookiesBrowsers"] {
+            legacy["Choices"].as_object_mut().unwrap().remove(key);
+        }
+        let legacy: Profile = serde_json::from_value(legacy).unwrap();
+        let loaded = legacy.resolve(dir.path()).unwrap();
+        assert_eq!(loaded.cookies_mode, model::CookieMode::Single);
+        assert!(loaded.cookies_auto_refresh);
     }
     #[test]
     fn package_round_trip_replaces_overlay_and_detects_damage() {
