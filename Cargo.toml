@@ -1,6 +1,6 @@
 [package]
 name = "workflow-media"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.95"
 description = "WorkFlow Media: portable desktop downloads and media library"
@@ -42,6 +42,7 @@ semver = "1"
 ed25519-dalek = "2"
 
 [target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
 winreg = "0.55"
 clipboard-win = "5"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_JobObjects", "Win32_Security", "Win32_Storage_FileSystem"] }

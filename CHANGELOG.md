@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Fixed restoring the Windows application after hiding it to the notification area.
+- Kept tray commands, update handling and second-launch activation responsive while the window is hidden or minimized.
+
 ## 0.5.0
 
 - Reimplemented the desktop application in Rust with egui/eframe. Removed the dependency on the legacy Windows Forms UI and external media executables.
@@ -7,6 +12,7 @@
 - Added vector navigation icons, a unified statistics strip and a clearly separated table with flat interactive headers.
 - Preserved queue/library separation, filtering/sorting, hidden columns, tray behavior, clipboard service selection and the portable setup preset.
 - Added English/Czech controls and protected, persistent FastShare credentials including the password.
+- Separated FastShare search and account controls into clearer cards with larger, aligned inputs.
 - Added signed release updates and Linux build instructions.
 
 Service-specific compatibility and desktop limitations are documented in README.md.

@@ -7,6 +7,45 @@ use std::{
     process::Command,
 };
 
+/// Keep the event loop responsive when Windows suppresses redraws for a hidden window.
+#[derive(Clone)]
+pub struct WindowWake {
+    ctx: eframe::egui::Context,
+    #[cfg(windows)]
+    hwnd: usize,
+}
+impl WindowWake {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        Self {
+            ctx: cc.egui_ctx.clone(),
+            #[cfg(windows)]
+            hwnd: {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                match cc.window_handle().map(|h| h.as_raw()) {
+                    Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get() as usize,
+                    _ => 0,
+                }
+            },
+        }
+    }
+    pub fn request(&self) {
+        self.ctx.request_repaint();
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                IsIconic, IsWindowVisible, PostMessageW, WM_PAINT,
+            };
+            let hwnd = self.hwnd as windows_sys::Win32::Foundation::HWND;
+            // winit normally uses RedrawWindow, which does not deliver paint events to
+            // hidden windows. Post the event without showing or focusing the window.
+            // The UI thread still owns all event handling and rendering.
+            if !hwnd.is_null() && unsafe { IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0 } {
+                unsafe { PostMessageW(hwnd, WM_PAINT, 0, 0) };
+            }
+        }
+    }
+}
+
 pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
     let mut c = Command::new(program);

@@ -129,7 +129,8 @@ impl App {
         let settings = state.settings.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let (tray_tx, tray_rx) = std::sync::mpsc::channel();
-        let tray = tray::Tray::new(&settings.language, tray_tx.clone(), cc.egui_ctx.clone());
+        let wake = platform::WindowWake::new(cc);
+        let tray = tray::Tray::new(&settings.language, tray_tx.clone(), wake.clone());
         let notice = tray
             .as_ref()
             .err()
@@ -197,6 +198,11 @@ impl App {
                 .unwrap_or_default();
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(400));
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                // Process tray actions, second launches and updates even while hidden.
+                wake.request();
                 if clipboard.is_none() {
                     clipboard = arboard::Clipboard::new().ok();
                 }

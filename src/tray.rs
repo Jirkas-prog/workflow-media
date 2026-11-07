@@ -75,10 +75,14 @@ fn make_menu(lang: &str) -> anyhow::Result<Menu> {
     }
     Ok(menu)
 }
-fn build(lang: &str, tx: Sender<Action>, ctx: eframe::egui::Context) -> anyhow::Result<TrayIcon> {
+fn build(
+    lang: &str,
+    tx: Sender<Action>,
+    wake: crate::platform::WindowWake,
+) -> anyhow::Result<TrayIcon> {
     let menu = make_menu(lang)?;
     let tx2 = tx.clone();
-    let ctx2 = ctx.clone();
+    let wake2 = wake.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let action = match event.id.0.as_str() {
             "open" => Action::Open,
@@ -92,7 +96,7 @@ fn build(lang: &str, tx: Sender<Action>, ctx: eframe::egui::Context) -> anyhow::
             _ => return,
         };
         let _ = tx2.send(action);
-        ctx2.request_repaint();
+        wake2.request();
     }));
     TrayIconEvent::set_event_handler(Some(move |e| {
         if matches!(
@@ -104,7 +108,7 @@ fn build(lang: &str, tx: Sender<Action>, ctx: eframe::egui::Context) -> anyhow::
             }
         ) {
             let _ = tx.send(Action::Open);
-            ctx.request_repaint();
+            wake.request();
         }
     }));
     let icon = image::load_from_memory(include_bytes!("../assets/workflow.png"))?
@@ -129,11 +133,15 @@ impl Tray {
         }
         Ok(())
     }
-    pub fn new(lang: &str, tx: Sender<Action>, ctx: eframe::egui::Context) -> anyhow::Result<Self> {
+    pub fn new(
+        lang: &str,
+        tx: Sender<Action>,
+        wake: crate::platform::WindowWake,
+    ) -> anyhow::Result<Self> {
         #[cfg(windows)]
         {
             Ok(Self {
-                _icon: build(lang, tx, ctx)?,
+                _icon: build(lang, tx, wake)?,
             })
         }
         #[cfg(target_os = "linux")]
@@ -144,7 +152,7 @@ impl Tray {
             let thread = std::thread::spawn(move || {
                 let result = gtk::init()
                     .map_err(|e| anyhow::anyhow!("{e}"))
-                    .and_then(|_| build(&lang, tx, ctx));
+                    .and_then(|_| build(&lang, tx, wake));
                 match result {
                     Ok(icon) => {
                         gtk::glib::timeout_add_local(
