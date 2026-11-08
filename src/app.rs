@@ -482,40 +482,11 @@ impl App {
                         continue;
                     }
                     match result {
-                        Ok(mut report) => {
-                            if !refreshed {
-                                for found in &mut report.profiles {
-                                    if let Some(old) =
-                                        self.settings.cookie_profiles.iter().find(|old| {
-                                            crate::cookies::key(old) == crate::cookies::key(found)
-                                        })
-                                    {
-                                        found.enabled = old.enabled;
-                                    }
-                                }
-                            }
-                            // Keep the user's selected ordering and any temporarily unavailable profiles.
-                            if self.settings.cookies_mode == model::CookieMode::Selected {
-                                for old in &self.settings.cookie_profiles {
-                                    if !report
-                                        .profiles
-                                        .iter()
-                                        .any(|p| crate::cookies::key(p) == crate::cookies::key(old))
-                                    {
-                                        report.profiles.push(old.clone());
-                                    }
-                                }
-                                report.profiles.sort_by_key(|p| {
-                                    self.settings
-                                        .cookie_profiles
-                                        .iter()
-                                        .position(|old| {
-                                            crate::cookies::key(old) == crate::cookies::key(p)
-                                        })
-                                        .unwrap_or(usize::MAX)
-                                });
-                            }
-                            self.settings.cookie_profiles = report.profiles;
+                        Ok(report) => {
+                            self.settings.cookie_profiles = crate::cookies::merge_profiles(
+                                report.profiles,
+                                &self.settings.cookie_profiles,
+                            );
                             self.cookie_results = report.results;
                             let successes = self
                                 .cookie_results
@@ -2234,7 +2205,13 @@ impl App {
                 crate::cookies::refresh(&settings, &cancel)
             } else {
                 Ok(crate::cookies::RefreshReport {
-                    profiles: crate::cookies::discover(&model::Browser::ALL),
+                    profiles: crate::cookies::discover(
+                        if settings.cookies_mode == model::CookieMode::All {
+                            &settings.cookies_browsers
+                        } else {
+                            &model::Browser::ALL
+                        },
+                    ),
                     results: Vec::new(),
                 })
             };
@@ -2267,6 +2244,14 @@ impl App {
     fn cookie_controls(&mut self, ui: &mut egui::Ui) {
         use model::CookieMode;
         let lang = self.settings.language.clone();
+        style::caption(
+            ui,
+            tr(
+                &lang,
+                "Každý odkaz se nejdříve zkusí bez cookies. Účty se použijí až při odmítnutí přístupu nebo požadavku na přihlášení.",
+                "Every link is tried without cookies first. Accounts are used only after an access denial or sign-in requirement.",
+            ),
+        );
         let mut enabled = self.settings.uses_browser_cookies();
         if style::checkbox(
             ui,
@@ -2376,8 +2361,8 @@ impl App {
                 ui,
                 tr(
                     &lang,
-                    "Obnoví cookies před stahováním, nejvýše jednou za minutu pro každý profil. Při vypnutí nebo nedostupném prohlížeči použije poslední kopii. První načtení je automatické; nové přihlášení proveďte v prohlížeči.",
-                    "Refreshes cookies before downloads, at most once per minute per profile. When disabled or the browser is unavailable, the last snapshot is used. The first load is automatic; sign in again in the browser when needed.",
+                    "Cookies obnoví pouze při potřebě přihlášení, nejvýše jednou za minutu pro každý profil. Při vypnutí nebo nedostupném prohlížeči použije poslední kopii. První načtení je automatické; nové přihlášení proveďte v prohlížeči.",
+                    "Refreshes cookies only when sign-in is needed, at most once per minute per profile. When disabled or the browser is unavailable, the last snapshot is used. The first load is automatic; sign in again in the browser when needed.",
                 ),
             );
             if self.builder {
@@ -2393,7 +2378,7 @@ impl App {
             } else {
                 ui.add_space(10.);
                 ui.horizontal_wrapped(|ui| {
-                    if self.settings.cookies_mode == CookieMode::Selected
+                    if self.settings.cookies_mode != CookieMode::Single
                         && ui
                             .button(tr(&lang, "Vyhledat profily", "Find profiles"))
                             .clicked()
@@ -2438,29 +2423,39 @@ impl App {
                 if self.settings.cookies_mode != CookieMode::Single {
                     let selected = self.settings.cookies_mode == CookieMode::Selected;
                     let mut move_row = None;
-                    for i in 0..self.settings.cookie_profiles.len() {
+                    let visible: Vec<_> = self
+                        .settings
+                        .cookie_profiles
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| {
+                            selected || self.settings.cookies_browsers.contains(&p.browser)
+                        })
+                        .map(|(i, _)| i)
+                        .collect();
+                    for (position, &i) in visible.iter().enumerate() {
                         let profile = &mut self.settings.cookie_profiles[i];
-                        if !selected && !self.settings.cookies_browsers.contains(&profile.browser) {
-                            continue;
-                        }
                         ui.push_id(i, |ui| {
                             ui.horizontal_wrapped(|ui| {
+                                if ui
+                                    .add_enabled(position > 0, egui::Button::new("↑").small())
+                                    .on_hover_text(tr(&lang, "Zkusit dříve", "Try earlier"))
+                                    .clicked()
+                                {
+                                    move_row = Some((i, visible[position - 1]));
+                                }
+                                if ui
+                                    .add_enabled(
+                                        position + 1 < visible.len(),
+                                        egui::Button::new("↓").small(),
+                                    )
+                                    .on_hover_text(tr(&lang, "Zkusit později", "Try later"))
+                                    .clicked()
+                                {
+                                    move_row = Some((i, visible[position + 1]));
+                                }
+                                ui.label(format!("{}.", position + 1));
                                 if selected {
-                                    if ui
-                                        .small_button("↑")
-                                        .on_hover_text(tr(&lang, "Zkusit dříve", "Try earlier"))
-                                        .clicked()
-                                        && i > 0
-                                    {
-                                        move_row = Some((i, i - 1));
-                                    }
-                                    if ui
-                                        .small_button("↓")
-                                        .on_hover_text(tr(&lang, "Zkusit později", "Try later"))
-                                        .clicked()
-                                    {
-                                        move_row = Some((i, i + 1));
-                                    }
                                     style::checkbox(ui, &mut profile.enabled, &profile.label);
                                 } else {
                                     ui.add(egui::Label::new(&profile.label).wrap());
@@ -2503,8 +2498,8 @@ impl App {
                         ui,
                         tr(
                             &lang,
-                            "Každý účet se zkouší samostatně. Při odmítnutí přístupu aplikace přejde na další profil a po úspěchu skončí. Cookies různých účtů se neslučují.",
-                            "Each account is tried separately. Access failures move to the next profile; success ends the search. Cookies from different accounts are never merged.",
+                            "Nejdříve vždy bez cookies, potom účty shora dolů. Šipkami změňte prioritu; pořadí zůstane zachované i po obnovení a nové profily se přidají na konec. Po úspěchu se další účty nezkouší. Cookies účtů se neslučují.",
+                            "Always without cookies first, then accounts from top to bottom. Use the arrows to change priority; refresh preserves the order and new profiles are appended. Success stops further attempts. Account cookies are never merged.",
                         ),
                     );
                 } else if let Some((_, result)) = self.cookie_results.first() {

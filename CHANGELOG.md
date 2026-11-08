@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2
+
+- Every media download and metadata lookup now starts without cookies. Browser discovery, decryption, cache locking and refresh are delayed until an access/sign-in failure; public downloads no longer depend on accessible browser profiles.
+- Added persistent account priorities in all-profile mode, numbered rows and enabled/disabled move arrows. Rescanning/refreshing preserves the order and selection; newly discovered profiles follow existing accounts. The same controls are available in Settings and setup.
+- Fixed large YouTube metadata responses by requesting only the title and compact format fields. Full responses containing signed segment URLs could exceed the process reader frame size and cause missing-metadata errors.
+- Kept anonymous, browser-account and manual-cookie partial transfers separate. Added anonymous-first real HTTP coverage, no-cookie-I/O tests and priority persistence tests.
+
 ## 0.8.1
 
 - Fixed account fallback misclassifying local file/tool failures or digits in video IDs as authentication or rate-limit errors.

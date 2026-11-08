@@ -503,6 +503,11 @@ impl Engine {
     fn download_video(&self, job: &Job, settings: &Settings, cancel: &AtomicBool) -> Result<()> {
         let path = crate::media::download(job, settings, cancel, |update| {
             self.change(&job.id, |j| match update {
+                crate::media::Update::Anonymous => {
+                    j.state = JobState::Connecting;
+                    j.speed = 0.;
+                    j.message = "@without-cookies".into();
+                }
                 crate::media::Update::Title(title) => j.title = title,
                 crate::media::Update::CookieProfile {
                     index,

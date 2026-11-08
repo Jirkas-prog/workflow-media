@@ -204,6 +204,39 @@ fn discover_in(roots: &[(Browser, PathBuf)], browsers: &[Browser]) -> Vec<Cookie
     }
     result
 }
+/// Existing accounts keep their priority; newly discovered accounts follow them.
+pub fn ordered_profiles(
+    mut found: Vec<CookieProfile>,
+    preferred: &[CookieProfile],
+) -> Vec<CookieProfile> {
+    let positions: std::collections::HashMap<_, _> = preferred
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (key(p), i))
+        .collect();
+    found.sort_by_key(|p| positions.get(&key(p)).copied().unwrap_or(usize::MAX));
+    found
+}
+
+/// Rescanning/refreshing must not reset priorities or selected account checkboxes.
+pub fn merge_profiles(
+    mut found: Vec<CookieProfile>,
+    previous: &[CookieProfile],
+) -> Vec<CookieProfile> {
+    for old in previous {
+        if let Some(profile) = found.iter_mut().find(|p| key(p) == key(old)) {
+            profile.enabled = old.enabled;
+        } else {
+            found.push(old.clone());
+        }
+    }
+    let mut merged = ordered_profiles(found, previous);
+    let mut seen = std::collections::HashSet::new();
+    merged.retain(|p| seen.insert(key(p)));
+    merged.truncate(128);
+    merged
+}
+
 pub fn profiles(settings: &Settings) -> Result<Vec<CookieProfile>> {
     let profiles = match settings.cookies_mode {
         CookieMode::Single => settings
@@ -222,7 +255,10 @@ pub fn profiles(settings: &Settings) -> Result<Vec<CookieProfile>> {
             .filter(|p| p.enabled)
             .cloned()
             .collect(),
-        CookieMode::All => discover(&settings.cookies_browsers),
+        CookieMode::All => ordered_profiles(
+            discover(&settings.cookies_browsers),
+            &settings.cookie_profiles,
+        ),
     };
     let mut seen = std::collections::HashSet::new();
     let profiles: Vec<_> = profiles
@@ -539,38 +575,56 @@ pub fn with_auth<T>(
     settings: &Settings,
     cancel: &AtomicBool,
     progress: impl FnMut(usize, usize, &str),
-    mut run: impl FnMut(&Settings, &str) -> Result<T>,
+    run: impl FnMut(&Settings, &str) -> Result<T>,
 ) -> Result<T> {
-    if !settings.uses_browser_cookies() {
-        if !settings.cookies_file.is_empty() {
-            // Both inspection and downloading may update a jar; preserve the user's export.
-            let file = tempfile::NamedTempFile::new()?;
-            fs::copy(&settings.cookies_file, file.path())?;
-            let mut configured = settings.clone();
-            configured.cookies_file = file.path().to_string_lossy().into_owned();
-            return run(&configured, "default");
-        }
-        return run(settings, "default");
-    }
-    let tools = tools::get()?;
-    with_auth_at(
+    with_auth_using(
         settings,
         cancel,
-        &cache_root(),
-        &tools.downloader,
+        || Ok((cache_root(), tools::get()?.downloader)),
         progress,
         run,
     )
 }
-fn with_auth_at<T>(
+
+fn with_auth_using<T>(
     settings: &Settings,
     cancel: &AtomicBool,
-    root: &Path,
-    downloader: &Path,
+    browser_tools: impl FnOnce() -> Result<(PathBuf, PathBuf)>,
     mut progress: impl FnMut(usize, usize, &str),
     mut run: impl FnMut(&Settings, &str) -> Result<T>,
 ) -> Result<T> {
+    if cancel.load(Ordering::Relaxed) {
+        bail!("@cancelled");
+    }
+    let mut anonymous = settings.clone();
+    anonymous.cookies_mode = CookieMode::Single;
+    anonymous.cookies_browser = None;
+    anonymous.cookies_file.clear();
+    progress(0, 0, "");
+    match run(&anonymous, "default") {
+        Ok(value) => return Ok(value),
+        Err(error)
+            if cancel.load(Ordering::Relaxed)
+                || !is_access_error(&error)
+                || (!settings.uses_browser_cookies() && settings.cookies_file.is_empty()) =>
+        {
+            return Err(error);
+        }
+        Err(_) => {}
+    }
+    // Cookie files, browser discovery, cache locks and exports are all lazy: a public
+    // download must not depend on the browser being unlocked or even installed.
+    if !settings.uses_browser_cookies() {
+        progress(1, 1, "cookies.txt");
+        // Both inspection and downloading may update a jar; preserve the user's export.
+        let file = tempfile::NamedTempFile::new()?;
+        fs::copy(&settings.cookies_file, file.path())?;
+        let mut configured = settings.clone();
+        configured.cookies_file = file.path().to_string_lossy().into_owned();
+        return run(&configured, "cookie-file");
+    }
     let profiles = profiles(settings)?;
+    let (root, downloader) = browser_tools()?;
     let prepared = std::cell::Cell::new(false);
     attempts(
         &profiles,
@@ -580,8 +634,8 @@ fn with_auth_at<T>(
             progress(index + 1, profiles.len(), &profile.label);
             let snapshot = snapshot(
                 profile,
-                root,
-                downloader,
+                &root,
+                &downloader,
                 settings.cookies_auto_refresh,
                 false,
                 cancel,
@@ -603,6 +657,22 @@ fn with_auth_at<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn with_auth_at<T>(
+        settings: &Settings,
+        cancel: &AtomicBool,
+        root: &Path,
+        downloader: &Path,
+        progress: impl FnMut(usize, usize, &str),
+        run: impl FnMut(&Settings, &str) -> Result<T>,
+    ) -> Result<T> {
+        with_auth_using(
+            settings,
+            cancel,
+            || Ok((root.into(), downloader.into())),
+            progress,
+            run,
+        )
+    }
     fn profile(browser: Browser, path: PathBuf) -> CookieProfile {
         CookieProfile {
             browser,
@@ -760,6 +830,108 @@ mod tests {
         assert!(!is_access_error(&local));
     }
     #[test]
+    fn public_downloads_never_open_cookie_files_or_browser_profiles() {
+        for mode in [CookieMode::Single, CookieMode::Selected, CookieMode::All] {
+            let settings = Settings {
+                cookies_mode: mode,
+                cookies_file: "nonexistent-cookie-file".into(),
+                cookie_profiles: Vec::new(),
+                ..Settings::default()
+            };
+            let mut calls = 0;
+            let result = with_auth_using(
+                &settings,
+                &AtomicBool::new(false),
+                || panic!("public downloads must not prepare browser cookies"),
+                |i, total, _| {
+                    assert_eq!((i, total), (0, 0));
+                },
+                |s, id| {
+                    calls += 1;
+                    assert!(!s.uses_browser_cookies());
+                    assert!(s.cookies_file.is_empty());
+                    assert_eq!(id, "default");
+                    Ok(42)
+                },
+            )
+            .unwrap();
+            assert_eq!((result, calls), (42, 1));
+        }
+    }
+    #[test]
+    fn anonymous_network_errors_and_cancellation_do_not_try_accounts() {
+        let settings = Settings {
+            cookies_mode: CookieMode::All,
+            ..Settings::default()
+        };
+        for message in [
+            "HTTP Error 429",
+            "Connection timed out",
+            "No space left on device",
+        ] {
+            let error = with_auth_using::<()>(
+                &settings,
+                &AtomicBool::new(false),
+                || panic!("non-access errors must not load accounts"),
+                |_, _, _| {},
+                |_, _| bail!("{message}"),
+            )
+            .unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+        let cancel = AtomicBool::new(false);
+        let result = with_auth_using::<()>(
+            &settings,
+            &cancel,
+            || panic!("cancelled jobs must not load accounts"),
+            |_, _, _| {},
+            |_, _| {
+                cancel.store(true, Ordering::Relaxed);
+                bail!("HTTP Error 403");
+            },
+        );
+        assert!(result.is_err());
+    }
+    #[test]
+    fn all_profiles_keep_saved_priority_after_discovery_refresh_and_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let a = profile(Browser::Chrome, root.path().join("a"));
+        let mut b = profile(Browser::Brave, root.path().join("b"));
+        b.enabled = false;
+        let c = profile(Browser::Chrome, root.path().join("c"));
+        let previous = vec![b.clone(), a.clone()];
+        let found = vec![a.clone(), c.clone(), b.clone()];
+        let merged = merge_profiles(found.clone(), &previous);
+        assert_eq!(
+            merged.iter().map(key).collect::<Vec<_>>(),
+            vec![key(&b), key(&a), key(&c)]
+        );
+        assert!(!merged[0].enabled);
+        let settings = Settings {
+            cookies_mode: CookieMode::All,
+            cookie_profiles: merged,
+            ..Settings::default()
+        };
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert_eq!(
+            ordered_profiles(found, &restored.cookie_profiles)
+                .iter()
+                .map(key)
+                .collect::<Vec<_>>(),
+            vec![key(&b), key(&a), key(&c)]
+        );
+        // A temporarily missing profile retains its position when it reappears.
+        assert_eq!(
+            merge_profiles(vec![c], &previous)
+                .iter()
+                .map(key)
+                .take(2)
+                .collect::<Vec<_>>(),
+            vec![key(&b), key(&a)]
+        );
+    }
+    #[test]
     fn manual_cookie_exports_are_unchanged_and_temporary_copies_are_removed() {
         let root = tempfile::tempdir().unwrap();
         let original = root.path().join("cookies.txt");
@@ -775,7 +947,11 @@ mod tests {
                 &AtomicBool::new(false),
                 |_, _, _| {},
                 |s, id| {
-                    assert_eq!(id, "default");
+                    if id == "default" {
+                        assert!(s.cookies_file.is_empty());
+                        bail!("HTTP Error 403");
+                    }
+                    assert_eq!(id, "cookie-file");
                     temporary = PathBuf::from(&s.cookies_file);
                     assert_ne!(temporary, original);
                     assert_eq!(fs::read_to_string(&temporary)?, "original cookie jar");
@@ -847,7 +1023,8 @@ mod tests {
                         .find(|s| s.starts_with("sessionid="))
                         .unwrap_or("");
                     observed.lock().unwrap().push(identity.to_owned());
-                    if identity != "sessionid=account_7" {
+                    if identity != "sessionid=account_7" && !first.contains("/public-fixture.mp4 ")
+                    {
                         let _ = write!(
                             stream,
                             "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -923,6 +1100,23 @@ mod tests {
             ..Settings::default()
         };
         let metadata = crate::media::inspect(&job.url, &manual, &cancel);
+        // All mode must download a public file even with no usable cookie profiles.
+        let public = Settings {
+            cookies_mode: CookieMode::All,
+            ..Settings::default()
+        };
+        let public_job = crate::model::Job {
+            url: format!("http://{address}/public-fixture.mp4"),
+            directory: root.path().display().to_string(),
+            ..Default::default()
+        };
+        let public_result = with_auth_using(
+            &public,
+            &cancel,
+            || panic!("public media must not touch browser cookies"),
+            |_, _, _| {},
+            |s, id| crate::media::download_one(&public_job, s, id, &cancel, &|_| {}),
+        );
         stop.store(true, Ordering::Relaxed);
         server.join().unwrap();
         let output = result.unwrap();
@@ -931,13 +1125,18 @@ mod tests {
             Sha256::digest(media.as_slice())
         );
         assert!(metadata.is_ok(), "{metadata:?}");
+        assert_eq!(
+            Sha256::digest(fs::read(public_result.unwrap()).unwrap()),
+            Sha256::digest(media.as_slice())
+        );
         assert_eq!(fs::read_to_string(cookie_path).unwrap(), original);
         let mut order = observed.lock().unwrap().clone();
         order.dedup();
         assert_eq!(
             order,
-            (0..8)
-                .map(|n| format!("sessionid=account_{n}"))
+            std::iter::once(String::new())
+                .chain((0..8).map(|n| format!("sessionid=account_{n}")))
+                .chain([String::new(), "sessionid=account_7".into(), String::new()])
                 .collect::<Vec<_>>()
         );
         assert_eq!(
@@ -946,7 +1145,7 @@ mod tests {
                 .flatten()
                 .filter(|e| e.path().extension().is_some_and(|x| x == "mp4"))
                 .count(),
-            1
+            2
         );
     }
 
@@ -980,11 +1179,19 @@ mod tests {
             cache.path(),
             &downloader,
             |i, total, _| {
+                if i == 0 {
+                    assert_eq!(total, 0);
+                    return;
+                }
                 assert_eq!(total, 8);
                 attempted.push(i);
             },
             |configured, identity| {
                 assert!(!configured.uses_browser_cookies());
+                if identity == "default" {
+                    assert!(configured.cookies_file.is_empty());
+                    bail!("HTTP Error 403");
+                }
                 let content = fs::read_to_string(&configured.cookies_file)?;
                 assert_eq!(count(&content), 1);
                 paths.push(configured.cookies_file.clone());
@@ -1060,6 +1267,9 @@ mod tests {
             &downloader,
             |_, _, _| {},
             |_, id| {
+                if id == "default" {
+                    bail!("HTTP Error 403");
+                }
                 n += 1;
                 assert_eq!(id, key(&ps[7]));
                 Ok(())
@@ -1075,11 +1285,20 @@ mod tests {
             &cancel,
             cache.path(),
             &downloader,
-            |_, total, _| {
+            |i, total, _| {
+                if i == 0 {
+                    return;
+                }
                 progress += 1;
                 assert_eq!(total, 1);
             },
-            |_, _| Ok(()),
+            |_, id| {
+                if id == "default" {
+                    Err(anyhow::anyhow!("HTTP Error 403"))
+                } else {
+                    Ok(())
+                }
+            },
         )
         .unwrap();
         assert_eq!(progress, 1);

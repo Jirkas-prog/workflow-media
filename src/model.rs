@@ -597,6 +597,7 @@ pub fn message(lang: &str, text: &str) -> String {
         return format!("{} {profile}", tr(lang, "Zkouším profil", "Trying profile"));
     }
     let text = match text {
+        "@without-cookies" => tr(lang, "Zkouším bez cookies…", "Trying without cookies…"),
         "@interrupted" => tr(
             lang,
             "Přerušeno zavřením aplikace. Pokračujte tlačítkem Obnovit.",

@@ -15,6 +15,7 @@ use std::{
 };
 
 pub enum Update {
+    Anonymous,
     Title(String),
     Progress {
         done: u64,
@@ -81,16 +82,29 @@ fn inspect_one(url: &str, settings: &Settings, cancel: &AtomicBool) -> Result<Va
     model::parse_url(url)?;
     let t = tools::get()?;
     let mut c = command(&t, settings)?;
-    c.args(["--dump-single-json", "--skip-download", "--", url]);
-    let mut report = None;
+    // Full YouTube metadata can contain megabytes of signed segment URLs. Request
+    // only the fields the UI needs instead of truncating/parsing that entire dump.
+    c.args([
+        "--skip-download",
+        "--print",
+        "WFM_TITLE:%(title)j",
+        "--print",
+        "WFM_FORMATS:%(formats.:.{ext,height,acodec,tbr})j",
+        "--",
+        url,
+    ]);
+    let mut title = None;
+    let mut formats = None;
     process::run(&mut c, cancel, Some(Duration::from_secs(150)), |line| {
-        if let Ok(v) = serde_json::from_str::<Value>(line) {
-            let formats: Vec<_> = v["formats"].as_array().into_iter().flatten().map(|f| serde_json::json!({"container":f["ext"], "height":f["height"], "audio":f["acodec"].as_str().is_some_and(|s|s!="none"), "bitrate":f["tbr"]})).collect();
-            // Signed media URLs and authentication headers never enter the public report.
-            report = Some(serde_json::json!({"title":v["title"], "formats":formats}));
+        if let Some(value) = line.strip_prefix("WFM_TITLE:") {
+            title = serde_json::from_str::<String>(value).ok();
+        } else if let Some(value) = line.strip_prefix("WFM_FORMATS:") {
+            formats = serde_json::from_str::<Vec<Value>>(value).ok();
         }
     })?;
-    report.context("No media metadata / Chybí údaje o videu")
+    let title = title.context("No media metadata / Chybí údaje o videu")?;
+    let formats: Vec<_> = formats.unwrap_or_default().iter().map(|f| serde_json::json!({"container":f["ext"], "height":f["height"], "audio":f["acodec"].as_str().is_some_and(|s|s!="none"), "bitrate":f["tbr"]})).collect();
+    Ok(serde_json::json!({"title":title,"formats":formats}))
 }
 pub fn download(
     job: &Job,
@@ -103,10 +117,14 @@ pub fn download(
         settings,
         cancel,
         |index, total, label| {
-            progress(Update::CookieProfile {
-                index,
-                total,
-                label: label.into(),
+            progress(if index == 0 {
+                Update::Anonymous
+            } else {
+                Update::CookieProfile {
+                    index,
+                    total,
+                    label: label.into(),
+                }
             })
         },
         |settings, identity| download_one(job, settings, identity, cancel, &progress),

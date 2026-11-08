@@ -36,11 +36,13 @@ V **Nastavení → Cookies a profily prohlížečů** zapněte **Používat cook
 
 - **Jeden výchozí profil:** yt-dlp použije výchozí nebo naposledy použitý profil vybraného prohlížeče.
 - **Vybrané profily postupně:** tlačítkem **Vyhledat profily** najdete účty, zaškrtnete požadované a šipkami nastavíte jejich pořadí.
-- **Vytáhnout všechny cookies:** vyberete Chrome, Brave, Firefox, Edge, Chromium, Operu nebo Vivaldi. Použijí se všechny nalezené profily těchto prohlížečů, včetně nově vytvořených. Stejnojmenné tlačítko je načte hned; jinak je načte první stahování.
+- **Vytáhnout všechny cookies:** vyberete Chrome, Brave, Firefox, Edge, Chromium, Operu nebo Vivaldi. Použijí se všechny nalezené profily těchto prohlížečů, včetně nově vytvořených. Tlačítko **Vyhledat profily** umožní nastavit jejich prioritu šipkami bez čtení cookies. **Vytáhnout všechny cookies** načte kopie hned. Uložené pořadí zůstane zachované po vyhledání i obnovení; nové účty přibudou na konci.
+
+**Každý odkaz se nejdříve zkusí bez cookies**, včetně načtení údajů o videu. Veřejné stahování nečte soubory cookies, neprohledává profily ani neobnovuje jejich kopie. Účty přijdou na řadu až při odmítnutí přístupu nebo požadavku na přihlášení.
 
 Šest profilů Chrome a dva Brave tak zůstávají osmi samostatnými účty. Při odmítnutém přístupu nebo požadavku na přihlášení se zkusí další profil, při úspěchu zkoušení skončí. Nečitelný profil se přeskočí. Cookies ani rozpracované soubory různých účtů se neslučují. Při chybě sítě, disku, zrušení nebo limitu HTTP 429 se další účty nezkoušejí. Obsah musí být dostupný alespoň jednomu z účtů.
 
-Volba **Automaticky aktualizovat cookies profilů** obnovuje uložené kopie před stahováním, nejvýše jednou za minutu pro každý profil. Při vypnutí se používá poslední kopie; první načtení proběhne vždy automaticky. Pokud automatická obnova selže, zůstává dostupná předchozí kopie. **Obnovit cookies nyní** vypíše případné chyby a nepřepíše funkční kopii neúspěšným exportem. Vypršené přihlášení obnovte v prohlížeči, aplikace se za vás znovu nepřihlašuje.
+Volba **Automaticky aktualizovat cookies profilů** obnovuje uložené kopie pouze při potřebě přihlášení, nejvýše jednou za minutu pro každý profil. Při vypnutí se používá poslední kopie; první načtení proběhne vždy automaticky. Pokud automatická obnova selže, zůstává dostupná předchozí kopie. **Obnovit cookies nyní** vypíše případné chyby a nepřepíše funkční kopii neúspěšným exportem. Vypršené přihlášení obnovte v prohlížeči, aplikace se za vás znovu nepřihlašuje.
 
 Kopie jsou chráněné pomocí Windows DPAPI nebo klíčenky Secret Service na Linuxu. Do předvolby se ukládají jen volby a místní cesty profilů, nikoli cookies. Dočasný soubor pro stahování obsahuje vždy jediný profil a po pokusu se odstraní. **Zapomenout uložené cookies** odstraní uložené kopie; další použití je načte znovu. Vypnutím cookies prohlížečů zastavíte další automatické načítání.
 

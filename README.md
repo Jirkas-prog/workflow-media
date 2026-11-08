@@ -48,11 +48,13 @@ Enable **Settings → Cookies and browser profiles → Use browser cookies**. Ch
 
 - **One default profile:** yt-dlp chooses the selected browser's default/recent profile.
 - **Try selected profiles in order:** click **Find profiles**, tick the accounts to use, and reorder them with the arrow buttons.
-- **Load all browser cookies:** select the browsers to search. All their discoverable profiles are used, including newly created profiles. Click the matching button to load them now, or let the first download load them.
+- **Load all browser cookies:** select the browsers to search. All their discoverable profiles are used, including newly created profiles. Click **Find profiles** to set their priority with the arrows without reading cookies, or **Load all browser cookies** to refresh snapshots immediately. Saved priorities survive rescanning and refresh; new accounts go last.
+
+**Every link is tried without cookies first**, including metadata inspection. Public downloads do not read cookie files, scan browser profiles or refresh snapshots. Accounts are tried only after an access/sign-in failure.
 
 For example, six Chrome profiles and two Brave profiles remain eight separate identities. On a sign-in, private-content or access error, the downloader tries the next identity and stops at the first successful download. An unreadable profile is skipped. Cookies and partial downloads from different accounts are never merged. Network failures, disk errors, cancellation and HTTP 429 rate limits stop the attempt instead of cycling through accounts. Only accounts that actually have access can retrieve the content.
 
-**Automatically refresh profile cookies** is on by default when browser cookies are used. Snapshots are refreshed before downloads, at most once per minute per profile. When disabled, the last saved snapshot is reused; the initial load is still automatic. If automatic refresh fails, an existing snapshot remains usable. **Refresh cookies now** reports failures without replacing a good snapshot. Expired sign-ins must be renewed in the browser; the app does not renew browser logins itself.
+**Automatically refresh profile cookies** is on by default when browser cookies are used. Snapshots are refreshed only when authentication is needed, at most once per minute per profile. When disabled, the last saved snapshot is reused; the initial load is still automatic. If automatic refresh fails, an existing snapshot remains usable. **Refresh cookies now** reports failures without replacing a good snapshot. Expired sign-ins must be renewed in the browser; the app does not renew browser logins itself.
 
 Saved snapshots use Windows DPAPI or the Linux Secret Service keyring. The downloader receives a temporary, single-profile cookie file that is removed after the attempt. Profile choices and local paths are preferences; cookie values are never placed in the portable preset. **Forget saved cookies** removes the snapshots; the next use loads them again. Disable browser cookies to stop future automatic reads. The app does not ask for the browser password or elevate the downloader.
 
