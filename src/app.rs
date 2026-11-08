@@ -1827,40 +1827,66 @@ impl App {
         let previous_theme = self.settings.theme;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 20.;
-            ui.allocate_ui(Vec2::new(175., 62.), |ui| {
-                ui.label(tr(&lang, "Jazyk aplikace", "Application language"));
-                egui::ComboBox::from_id_salt("language")
-                    .selected_text(if lang == "cs" { "Čeština" } else { "English" })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.settings.language, "cs".into(), "Čeština");
-                        ui.selectable_value(&mut self.settings.language, "en".into(), "English");
-                    });
-            });
-            ui.allocate_ui(Vec2::new(175., 62.), |ui| {
-                ui.label(tr(&lang, "Motiv aplikace", "Application theme"));
-                egui::ComboBox::from_id_salt("application-theme")
-                    .selected_text(self.settings.theme.label(&lang))
-                    .show_ui(ui, |ui| {
-                        for theme in [model::Theme::Dark, model::Theme::Light] {
+            ui.allocate_ui_with_layout(
+                Vec2::new(175., 62.),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.label(tr(&lang, "Jazyk aplikace", "Application language"));
+                    egui::ComboBox::from_id_salt("language")
+                        .width(175.)
+                        .wrap_mode(egui::TextWrapMode::Extend)
+                        .selected_text(if lang == "cs" { "Čeština" } else { "English" })
+                        .show_ui(ui, |ui| {
                             ui.selectable_value(
-                                &mut self.settings.theme,
-                                theme,
-                                theme.label(&lang),
+                                &mut self.settings.language,
+                                "cs".into(),
+                                "Čeština",
                             );
-                        }
-                    });
-            });
-            ui.allocate_ui(Vec2::new(175., 62.), |ui| {
-                ui.label(tr(&lang, "Souběžná stahování", "Parallel downloads"));
-                egui::ComboBox::from_id_salt("parallel")
-                    .height(320.)
-                    .selected_text(self.settings.parallel.to_string())
-                    .show_ui(ui, |ui| {
-                        for n in 1..=model::MAX_PARALLEL {
-                            ui.selectable_value(&mut self.settings.parallel, n, n.to_string());
-                        }
-                    });
-            });
+                            ui.selectable_value(
+                                &mut self.settings.language,
+                                "en".into(),
+                                "English",
+                            );
+                        });
+                },
+            );
+            ui.allocate_ui_with_layout(
+                Vec2::new(175., 62.),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.label(tr(&lang, "Motiv aplikace", "Application theme"));
+                    egui::ComboBox::from_id_salt("application-theme")
+                        .width(175.)
+                        .wrap_mode(egui::TextWrapMode::Extend)
+                        .selected_text(self.settings.theme.label(&lang))
+                        .show_ui(ui, |ui| {
+                            for theme in [model::Theme::Dark, model::Theme::Light] {
+                                ui.selectable_value(
+                                    &mut self.settings.theme,
+                                    theme,
+                                    theme.label(&lang),
+                                );
+                            }
+                        });
+                },
+            );
+            ui.allocate_ui_with_layout(
+                Vec2::new(175., 62.),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.label(tr(&lang, "Souběžná stahování", "Parallel downloads"));
+                    egui::ComboBox::from_id_salt("parallel")
+                        .width(175.)
+                        .wrap_mode(egui::TextWrapMode::Extend)
+                        .height(320.)
+                        .selected_text(self.settings.parallel.to_string())
+                        .show_ui(ui, |ui| {
+                            for n in 1..=model::MAX_PARALLEL {
+                                ui.selectable_value(&mut self.settings.parallel, n, n.to_string());
+                            }
+                        });
+                },
+            );
         });
         if self.settings.theme != previous_theme {
             style::select(ui.ctx(), self.settings.theme);
@@ -3365,6 +3391,91 @@ mod tests {
             update_checked: Instant::now(),
             quitting: false,
             exit_ready: false,
+        }
+    }
+
+    #[test]
+    fn general_option_values_stay_on_one_line_in_settings_and_both_guides() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = form_app(dir.path());
+        app.settings.parallel = 16;
+        for lang in ["cs", "en"] {
+            app.settings.language = lang.into();
+            for theme in [model::Theme::Dark, model::Theme::Light] {
+                app.settings.theme = theme;
+                for page in 0..3 {
+                    app.builder = page == 2;
+                    app.setup = (page > 0).then_some(0);
+                    for width in [320., 480., 720., 960., 1100., 1600.] {
+                        let ctx = egui::Context::default();
+                        style::apply(&ctx, theme);
+                        for _ in 0..3 {
+                            let output = ctx.run(
+                                egui::RawInput {
+                                    screen_rect: Some(egui::Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        Vec2::new(width, 1000.),
+                                    )),
+                                    ..Default::default()
+                                },
+                                |ctx| {
+                                    egui::CentralPanel::default().show(ctx, |ui| {
+                                        if page == 0 {
+                                            app.settings_page(ui);
+                                        } else {
+                                            app.wizard(ui);
+                                        }
+                                    });
+                                },
+                            );
+                            for (caption, value) in [
+                                (
+                                    tr(lang, "Jazyk aplikace", "Application language"),
+                                    if lang == "cs" { "Čeština" } else { "English" },
+                                ),
+                                (
+                                    tr(lang, "Motiv aplikace", "Application theme"),
+                                    theme.label(lang),
+                                ),
+                                (tr(lang, "Souběžná stahování", "Parallel downloads"), "16"),
+                            ] {
+                                let find = |label: &str| {
+                                    output
+                                        .shapes
+                                        .iter()
+                                        .find_map(|s| match &s.shape {
+                                            egui::Shape::Text(t) if t.galley.text() == label => {
+                                                Some(t)
+                                            }
+                                            _ => None,
+                                        })
+                                        .unwrap_or_else(|| {
+                                            panic!("Missing {label}, page {page}, width {width}")
+                                        })
+                                };
+                                let text = find(value);
+                                assert_eq!(
+                                    text.galley.rows.len(),
+                                    1,
+                                    "Value {value} split: page {page}, width {width}"
+                                );
+                                assert!(!text.galley.elided, "Value {value} truncated");
+                                let bounds = text.galley.rect.translate(text.pos.to_vec2());
+                                assert!(
+                                    bounds.left() >= 0. && bounds.right() <= width,
+                                    "Value {value} outside viewport: {bounds:?}, width {width}"
+                                );
+                                let label = find(caption);
+                                let label_bounds = label.galley.rect.translate(label.pos.to_vec2());
+                                assert!(
+                                    label_bounds.bottom() <= bounds.top(),
+                                    "Caption {caption} must sit above its control"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

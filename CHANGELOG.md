@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.7
+
+- Fixed the language and theme selections wrapping one letter per line in Settings. Each caption now sits above its control, and complete fields flow onto the next row in narrower windows. The shared fix also applies to first-run setup and Setup Builder.
+- Added a regression test against the real Settings page and both guides in English/Czech, Dark/Light and six viewport widths. It checks that selected values remain complete on one line and inside the viewport, with captions above them.
+
 ## 0.8.6
 
 - Added complete built-in Dark and Light palettes, independent of the operating system. Fixed the default light system style replacing dark controls while leaving a dark background. The theme is selectable and saved in Settings, setup and generated recipient installers.

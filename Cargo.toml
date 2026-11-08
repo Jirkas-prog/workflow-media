@@ -1,6 +1,6 @@
 [package]
 name = "workflow-media"
-version = "0.8.6"
+version = "0.8.7"
 default-run = "workflow-media"
 edition = "2024"
 rust-version = "1.95"
