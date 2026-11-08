@@ -4,6 +4,7 @@ mod cookies;
 mod engine;
 mod fastshare;
 mod installer;
+mod maintenance;
 mod media;
 mod model;
 mod platform;
@@ -135,6 +136,11 @@ fn run() -> Result<()> {
         data.join("builder.preset.json")
     } else {
         arg("--preset").unwrap_or_else(|| folder.join("WorkFlow Media.preset.json"))
+    };
+    let _registration = if !builder {
+        Some(maintenance::Registration::new(&data, &exe, &preset_path)?)
+    } else {
+        None
     };
     // A separate application data directory protects the previous .NET version.
     if !isolated && !preview && !data.join("queue.json").exists() {

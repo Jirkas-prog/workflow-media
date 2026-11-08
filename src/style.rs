@@ -1,30 +1,150 @@
+use crate::model::Theme;
 use eframe::egui::{self, Color32, Pos2, RichText, Stroke, Vec2};
-pub const BG: Color32 = Color32::from_rgb(20, 34, 43);
-pub const PANEL: Color32 = Color32::from_rgb(31, 51, 63);
-pub const LINE: Color32 = Color32::from_rgb(55, 80, 94);
-pub const TEXT: Color32 = Color32::from_rgb(220, 235, 242);
-pub const MUTED: Color32 = Color32::from_rgb(158, 187, 201);
-pub const LIME: Color32 = Color32::from_rgb(196, 250, 103);
-pub const BLUE: Color32 = Color32::from_rgb(126, 196, 218);
-pub const GREEN: Color32 = Color32::from_rgb(139, 211, 178);
-pub const RED: Color32 = Color32::from_rgb(255, 155, 127);
-pub fn apply(ctx: &egui::Context) {
+
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub bg: Color32,
+    pub panel: Color32,
+    pub sidebar: Color32,
+    pub line: Color32,
+    pub text: Color32,
+    pub muted: Color32,
+    pub accent: Color32,
+    pub blue: Color32,
+    pub green: Color32,
+    pub red: Color32,
+    pub field: Color32,
+    pub stripe: Color32,
+    pub header: Color32,
+    pub selection: Color32,
+    pub button: Color32,
+    pub hover: Color32,
+    pub pressed: Color32,
+    pub outline: Color32,
+    pub primary: Color32,
+    pub primary_hover: Color32,
+    pub primary_pressed: Color32,
+    pub primary_text: Color32,
+    pub pattern: Color32,
+    pub pattern_line: Color32,
+    pub watermark: Color32,
+}
+const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
+    Color32::from_rgb(r, g, b)
+}
+pub const DARK: Palette = Palette {
+    bg: rgb(20, 34, 43),
+    panel: rgb(31, 51, 63),
+    sidebar: rgb(15, 30, 39),
+    line: rgb(55, 80, 94),
+    text: rgb(220, 235, 242),
+    muted: rgb(170, 198, 210),
+    accent: rgb(196, 250, 103),
+    blue: rgb(140, 207, 226),
+    green: rgb(139, 211, 178),
+    red: rgb(255, 173, 150),
+    field: rgb(19, 37, 47),
+    stripe: rgb(29, 50, 61),
+    header: rgb(16, 33, 42),
+    selection: rgb(55, 81, 67),
+    button: rgb(40, 64, 77),
+    hover: rgb(51, 80, 94),
+    pressed: rgb(32, 57, 67),
+    outline: rgb(65, 94, 109),
+    primary: rgb(196, 250, 103),
+    primary_hover: rgb(213, 255, 141),
+    primary_pressed: rgb(169, 222, 80),
+    primary_text: rgb(20, 34, 43),
+    pattern: rgb(24, 42, 51),
+    pattern_line: rgb(28, 46, 55),
+    watermark: rgb(36, 54, 60),
+};
+pub const LIGHT: Palette = Palette {
+    bg: rgb(238, 244, 244),
+    panel: rgb(252, 254, 253),
+    sidebar: rgb(228, 238, 235),
+    line: rgb(185, 204, 201),
+    text: rgb(25, 47, 53),
+    muted: rgb(76, 103, 110),
+    accent: rgb(45, 100, 28),
+    blue: rgb(24, 100, 127),
+    green: rgb(28, 112, 80),
+    red: rgb(170, 57, 36),
+    field: rgb(255, 255, 255),
+    stripe: rgb(235, 243, 241),
+    header: rgb(224, 236, 232),
+    selection: rgb(211, 232, 199),
+    button: rgb(228, 239, 235),
+    hover: rgb(211, 229, 222),
+    pressed: rgb(196, 217, 207),
+    outline: rgb(145, 171, 165),
+    primary: rgb(49, 110, 37),
+    primary_hover: rgb(39, 95, 28),
+    primary_pressed: rgb(30, 80, 22),
+    primary_text: rgb(255, 255, 255),
+    pattern: rgb(230, 239, 235),
+    pattern_line: rgb(222, 233, 228),
+    watermark: rgb(210, 226, 215),
+};
+pub fn palette(theme: Theme) -> &'static Palette {
+    match theme {
+        Theme::Dark => &DARK,
+        Theme::Light => &LIGHT,
+    }
+}
+fn colors(ui: &egui::Ui) -> &'static Palette {
+    if ui.visuals().dark_mode {
+        &DARK
+    } else {
+        &LIGHT
+    }
+}
+fn egui_theme(theme: Theme) -> egui::Theme {
+    match theme {
+        Theme::Dark => egui::Theme::Dark,
+        Theme::Light => egui::Theme::Light,
+    }
+}
+/// Explicit preference also protects against later OS theme-change events.
+pub fn select(ctx: &egui::Context, theme: Theme) {
+    ctx.set_theme(egui_theme(theme));
+    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(match theme {
+        Theme::Dark => egui::SystemTheme::Dark,
+        Theme::Light => egui::SystemTheme::Light,
+    }));
+    ctx.request_repaint();
+}
+pub fn sync(ctx: &egui::Context, theme: Theme) {
+    if ctx.options(|o| o.theme_preference) != egui::ThemePreference::from(egui_theme(theme)) {
+        select(ctx, theme);
+    }
+}
+fn theme_style(theme: Theme) -> egui::Style {
+    let c = palette(theme);
     let mut s = egui::Style::default();
-    s.visuals = egui::Visuals::dark();
-    s.visuals.override_text_color = Some(TEXT);
-    s.visuals.panel_fill = BG;
-    s.visuals.window_fill = PANEL;
-    s.visuals.extreme_bg_color = Color32::from_rgb(17, 34, 43);
-    s.visuals.text_edit_bg_color = Some(Color32::from_rgb(19, 37, 47));
-    s.visuals.faint_bg_color = Color32::from_rgb(29, 50, 61);
-    s.visuals.code_bg_color = BG;
-    s.visuals.selection.bg_fill = Color32::from_rgb(55, 81, 67);
-    s.visuals.selection.stroke = Stroke::new(1.5_f32, LIME);
-    s.visuals.text_cursor.stroke = Stroke::new(1.5_f32, LIME);
+    s.visuals = match theme {
+        Theme::Dark => egui::Visuals::dark(),
+        Theme::Light => egui::Visuals::light(),
+    };
+    s.visuals.override_text_color = Some(c.text);
+    s.visuals.weak_text_color = Some(c.muted);
+    s.visuals.hyperlink_color = c.blue;
+    s.visuals.warn_fg_color = c.red;
+    s.visuals.error_fg_color = c.red;
+    s.visuals.panel_fill = c.bg;
+    s.visuals.window_fill = c.panel;
+    s.visuals.extreme_bg_color = c.header;
+    s.visuals.text_edit_bg_color = Some(c.field);
+    s.visuals.faint_bg_color = c.stripe;
+    s.visuals.code_bg_color = c.field;
+    s.visuals.selection.bg_fill = c.selection;
+    s.visuals.selection.stroke = Stroke::new(1.5_f32, c.accent);
+    s.visuals.text_cursor.stroke = Stroke::new(1.5_f32, c.accent);
     s.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
-    s.visuals.widgets.noninteractive.bg_fill = PANEL;
-    s.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE);
-    s.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, MUTED);
+    s.visuals.widgets.noninteractive.bg_fill = c.panel;
+    s.visuals.widgets.noninteractive.weak_bg_fill = c.panel;
+    s.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, c.line);
+    s.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, c.muted);
     for w in [
         &mut s.visuals.widgets.inactive,
         &mut s.visuals.widgets.hovered,
@@ -32,24 +152,24 @@ pub fn apply(ctx: &egui::Context) {
         &mut s.visuals.widgets.open,
     ] {
         w.corner_radius = egui::CornerRadius::same(8);
-        w.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(65, 94, 109));
-        w.fg_stroke = Stroke::new(1.0_f32, TEXT);
+        w.bg_stroke = Stroke::new(1.0_f32, c.outline);
+        w.fg_stroke = Stroke::new(1.0_f32, c.text);
         w.expansion = 0.;
     }
-    s.visuals.widgets.inactive.bg_fill = Color32::from_rgb(40, 64, 77);
-    s.visuals.widgets.hovered.bg_fill = Color32::from_rgb(51, 80, 94);
-    s.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, BLUE);
-    s.visuals.widgets.active.bg_fill = Color32::from_rgb(32, 57, 67);
-    s.visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, BLUE);
-    s.visuals.widgets.open.bg_fill = Color32::from_rgb(35, 59, 71);
-    s.visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, BLUE);
+    s.visuals.widgets.inactive.bg_fill = c.button;
+    s.visuals.widgets.hovered.bg_fill = c.hover;
+    s.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, c.blue);
+    s.visuals.widgets.active.bg_fill = c.pressed;
+    s.visuals.widgets.active.bg_stroke = Stroke::new(1.5_f32, c.blue);
+    s.visuals.widgets.open.bg_fill = c.hover;
+    s.visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, c.blue);
     s.visuals.widgets.inactive.weak_bg_fill = s.visuals.widgets.inactive.bg_fill;
     s.visuals.widgets.hovered.weak_bg_fill = s.visuals.widgets.hovered.bg_fill;
     s.visuals.widgets.active.weak_bg_fill = s.visuals.widgets.active.bg_fill;
     s.visuals.widgets.open.weak_bg_fill = s.visuals.widgets.open.bg_fill;
     s.visuals.window_corner_radius = egui::CornerRadius::same(12);
     s.visuals.menu_corner_radius = egui::CornerRadius::same(10);
-    s.visuals.window_stroke = Stroke::new(1.0_f32, LINE);
+    s.visuals.window_stroke = Stroke::new(1.0_f32, c.line);
     s.visuals.popup_shadow = egui::epaint::Shadow {
         offset: [0, 5],
         blur: 18,
@@ -73,7 +193,13 @@ pub fn apply(ctx: &egui::Context) {
     ] {
         s.text_styles.insert(kind, egui::FontId::proportional(size));
     }
-    ctx.set_style(s);
+    s
+}
+pub fn apply(ctx: &egui::Context, theme: Theme) {
+    // Install BOTH complete styles rather than overwriting only the style currently selected by the OS.
+    ctx.set_style_of(egui::Theme::Dark, theme_style(Theme::Dark));
+    ctx.set_style_of(egui::Theme::Light, theme_style(Theme::Light));
+    select(ctx, theme);
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "Inter".into(),
@@ -100,6 +226,7 @@ pub enum NavIcon {
 }
 /// Vector paths share one 24-unit grid and remain sharp at every display scale.
 pub fn nav_button(ui: &mut egui::Ui, label: &str, icon: NavIcon, selected: bool) -> egui::Response {
+    let c = colors(ui);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.), egui::Sense::click());
     response.widget_info(|| {
@@ -112,22 +239,18 @@ pub fn nav_button(ui: &mut egui::Ui, label: &str, icon: NavIcon, selected: bool)
     });
     let hover = response.hovered() || response.has_focus();
     let color = if selected {
-        LIME
+        c.accent
     } else if hover {
-        TEXT
+        c.text
     } else {
-        MUTED
+        c.muted
     };
     if selected || hover {
         ui.painter().rect(
             rect,
             8.,
-            if selected {
-                PANEL
-            } else {
-                Color32::from_rgb(23, 42, 52)
-            },
-            Stroke::new(1.0_f32, LINE),
+            if selected { c.selection } else { c.hover },
+            Stroke::new(1.0_f32, c.line),
             egui::StrokeKind::Inside,
         );
     }
@@ -188,9 +311,10 @@ fn draw_icon(p: &egui::Painter, c: Pos2, icon: NavIcon, color: Color32) {
     }
 }
 pub fn background(ui: &egui::Ui) {
+    let c = colors(ui);
     let r = ui.max_rect();
     let p = ui.painter().with_clip_rect(r);
-    p.rect_filled(r, 0., BG);
+    p.rect_filled(r, 0., c.bg);
     let w = r.width();
     let h = r.height();
     p.add(egui::Shape::convex_polygon(
@@ -201,14 +325,14 @@ pub fn background(ui: &egui::Ui) {
             Pos2::new(r.right(), r.top() + h * 0.55),
             Pos2::new(r.left() + w * 0.78, r.bottom()),
         ],
-        Color32::from_rgb(24, 42, 51),
+        c.pattern,
         Stroke::NONE,
     ));
     let mut x = r.left() + w * 0.60;
     while x < r.right() + h * 0.67 {
         p.line_segment(
             [Pos2::new(x, r.top()), Pos2::new(x - h * 0.67, r.bottom())],
-            Stroke::new(0.7_f32, Color32::from_rgba_unmultiplied(150, 183, 172, 8)),
+            Stroke::new(0.7_f32, c.pattern_line),
         );
         x += 36.;
     }
@@ -216,7 +340,7 @@ pub fn background(ui: &egui::Ui) {
         &p,
         Pos2::new(r.right() - 145., r.top() + 155.),
         210.,
-        Color32::from_rgba_unmultiplied(170, 203, 173, 15),
+        c.watermark,
     );
 }
 pub fn logo(p: &egui::Painter, c: Pos2, size: f32, color: Color32) {
@@ -230,10 +354,11 @@ pub fn logo(p: &egui::Painter, c: Pos2, size: f32, color: Color32) {
     p.line_segment([point(40., 18.), point(40., 45.)], stroke);
     p.line_segment([point(-45., 40.), point(45., 40.)], stroke);
 }
-pub fn card() -> egui::Frame {
+pub fn card(ui: &egui::Ui) -> egui::Frame {
+    let c = colors(ui);
     egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(31, 51, 63, 246))
-        .stroke(Stroke::new(1.0_f32, LINE))
+        .fill(c.panel)
+        .stroke(Stroke::new(1.0_f32, c.line))
         .inner_margin(18)
         .corner_radius(11)
 }
@@ -242,6 +367,7 @@ pub fn checkbox(
     checked: &mut bool,
     label: impl Into<egui::WidgetText>,
 ) -> egui::Response {
+    let c = colors(ui);
     ui.scope(|ui| {
         let selected = *checked;
         let v = ui.visuals_mut();
@@ -252,20 +378,9 @@ pub fn checkbox(
             &mut v.widgets.open,
         ] {
             w.corner_radius = egui::CornerRadius::same(3);
-            w.bg_fill = if selected {
-                Color32::from_rgb(52, 79, 61)
-            } else {
-                BG
-            };
-            w.bg_stroke = Stroke::new(
-                1.2_f32,
-                if selected {
-                    LIME
-                } else {
-                    Color32::from_rgb(82, 115, 126)
-                },
-            );
-            w.fg_stroke = Stroke::new(1.7_f32, LIME);
+            w.bg_fill = if selected { c.selection } else { c.field };
+            w.bg_stroke = Stroke::new(1.2_f32, if selected { c.accent } else { c.outline });
+            w.fg_stroke = Stroke::new(1.7_f32, c.accent);
         }
         ui.checkbox(checked, label)
     })
@@ -275,21 +390,22 @@ pub fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
     primary_sized(ui, label, Vec2::new(136., 38.))
 }
 pub fn primary_sized(ui: &mut egui::Ui, label: &str, size: Vec2) -> egui::Response {
+    let c = colors(ui);
     ui.scope(|ui| {
         let widgets = &mut ui.visuals_mut().widgets;
         for (widget, fill) in [
-            (&mut widgets.inactive, LIME),
-            (&mut widgets.hovered, Color32::from_rgb(213, 255, 141)),
-            (&mut widgets.active, Color32::from_rgb(169, 222, 80)),
-            (&mut widgets.open, LIME),
+            (&mut widgets.inactive, c.primary),
+            (&mut widgets.hovered, c.primary_hover),
+            (&mut widgets.active, c.primary_pressed),
+            (&mut widgets.open, c.primary),
         ] {
             widget.bg_fill = fill;
             widget.weak_bg_fill = fill;
-            widget.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(223, 255, 171));
-            widget.fg_stroke = Stroke::new(1.0_f32, BG);
+            widget.bg_stroke = Stroke::new(1.0_f32, c.primary);
+            widget.fg_stroke = Stroke::new(1.0_f32, c.primary_text);
         }
         ui.add(
-            egui::Button::new(RichText::new(label).color(BG).strong())
+            egui::Button::new(RichText::new(label).color(c.primary_text).strong())
                 .corner_radius(8)
                 .min_size(size),
         )
@@ -326,12 +442,108 @@ pub fn title(ui: &mut egui::Ui, label: &str) {
     ui.label(RichText::new(label).size(18.).strong());
 }
 pub fn caption(ui: &mut egui::Ui, label: &str) {
-    ui.label(RichText::new(label).size(12.).color(MUTED));
+    ui.label(RichText::new(label).size(12.).color(colors(ui).muted));
 }
 
 #[cfg(test)]
 mod layout_tests {
     use super::*;
+    #[test]
+    fn application_styles_ignore_initial_and_changing_system_themes() {
+        for initial in [None, Some(egui::Theme::Light), Some(egui::Theme::Dark)] {
+            let ctx = egui::Context::default();
+            let _ = ctx.run(
+                egui::RawInput {
+                    system_theme: initial,
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            apply(&ctx, Theme::Dark);
+            for chosen in [Theme::Dark, Theme::Light, Theme::Dark] {
+                select(&ctx, chosen);
+                let expected = theme_style(chosen);
+                for system in [Some(egui::Theme::Light), Some(egui::Theme::Dark), None] {
+                    let _ = ctx.run(
+                        egui::RawInput {
+                            system_theme: system,
+                            ..Default::default()
+                        },
+                        |ctx| {
+                            assert_eq!(ctx.theme(), egui_theme(chosen));
+                            assert_ne!(
+                                ctx.options(|o| o.theme_preference),
+                                egui::ThemePreference::System
+                            );
+                            assert_eq!(ctx.style().visuals, expected.visuals);
+                            assert_eq!(
+                                ctx.style().spacing.button_padding,
+                                expected.spacing.button_padding
+                            );
+                            assert_eq!(ctx.style().text_styles, expected.text_styles);
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                assert_eq!(
+                                    ui.visuals().override_text_color,
+                                    Some(palette(chosen).text)
+                                );
+                                assert_eq!(
+                                    ui.visuals().text_edit_bg_color,
+                                    Some(palette(chosen).field)
+                                );
+                            });
+                        },
+                    );
+                }
+            }
+        }
+    }
+
+    // Relative luminance: https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html
+    fn contrast(a: Color32, b: Color32) -> f64 {
+        let luminance = |c: Color32| {
+            let linear = |n: u8| {
+                let n = n as f64 / 255.;
+                if n <= 0.04045 {
+                    n / 12.92
+                } else {
+                    ((n + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+        };
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn both_palettes_keep_readable_text_fields_buttons_and_selected_rows() {
+        for theme in [Theme::Dark, Theme::Light] {
+            let c = palette(theme);
+            for bg in [
+                c.bg,
+                c.panel,
+                c.sidebar,
+                c.field,
+                c.stripe,
+                c.header,
+                c.selection,
+                c.button,
+                c.hover,
+            ] {
+                for fg in [c.text, c.muted, c.accent, c.blue, c.green, c.red] {
+                    assert!(
+                        contrast(fg, bg) >= 4.5,
+                        "{theme:?}: {fg:?} on {bg:?} = {}",
+                        contrast(fg, bg)
+                    );
+                }
+            }
+            for bg in [c.primary, c.primary_hover, c.primary_pressed] {
+                assert!(contrast(c.primary_text, bg) >= 4.5);
+            }
+        }
+    }
+
     #[test]
     fn long_paths_wrap_without_expanding_the_field_or_changing_the_value() {
         let value = format!(
@@ -340,7 +552,7 @@ mod layout_tests {
         );
         let measure = |width: f32| {
             let ctx = egui::Context::default();
-            apply(&ctx);
+            apply(&ctx, Theme::Dark);
             let mut text = value.clone();
             let mut rect = egui::Rect::NOTHING;
             let _ = ctx.run(egui::RawInput::default(), |ctx| {

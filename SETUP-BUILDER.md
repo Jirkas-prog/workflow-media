@@ -70,3 +70,7 @@ Headless developer commands:
 ```
 
 The profile schema is `installer::Profile` in `src/installer.rs`. The last command downloads and verifies a real release and writes the app/preset under the explicit test directory. This isolated test mode skips UAC, startup registration, shortcuts and launch; ordinary double-click installation performs those integration steps.
+
+## Application theme
+
+Choose **Dark** or **Light** in the application settings step. Both palettes are embedded in the app and ignore the recipient's OS theme. The choice is included in the generated portable preset; profiles created before 0.8.6 default to Dark.

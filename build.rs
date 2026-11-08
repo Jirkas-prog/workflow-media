@@ -27,7 +27,9 @@ fn main() {
             .set("ProductName", "WorkFlow Media")
             .set(
                 "FileDescription",
-                if stub {
+                if env::var_os("CARGO_FEATURE_UPDATE_HELPER").is_some() {
+                    "WorkFlow Media · Update helper"
+                } else if stub {
                     "WorkFlow Media · Web installer"
                 } else if builder {
                     "WorkFlow Media · Setup Builder"

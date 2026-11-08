@@ -1,6 +1,6 @@
 [package]
 name = "workflow-media"
-version = "0.8.5"
+version = "0.8.6"
 default-run = "workflow-media"
 edition = "2024"
 rust-version = "1.95"
@@ -11,11 +11,17 @@ build = "build.rs"
 [features]
 setup-stub = []
 setup-builder = []
+update-helper = ["setup-stub"]
 
 [[bin]]
 name = "workflow-setup"
 path = "src/bin/workflow-setup.rs"
 required-features = ["setup-stub"]
+
+[[bin]]
+name = "workflow-update"
+path = "src/bin/workflow-update.rs"
+required-features = ["update-helper"]
 
 [dependencies]
 anyhow = "1"
@@ -50,7 +56,7 @@ windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] 
 raw-window-handle = "0.6"
 winreg = "0.55"
 clipboard-win = "5"
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls", "Win32_System_JobObjects", "Win32_Security", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_JobObjects", "Win32_Security", "Win32_Storage_FileSystem"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

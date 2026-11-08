@@ -1,5 +1,17 @@
 # Validation and test coverage
 
+Version 0.8.6 passes 51 ordinary application tests on Windows, 49 on Ubuntu 24.04 and 11 tests in the Windows update-helper target. Theme tests replay actual UI input in English/Czech settings and both guides, round-trip the selected theme through presets/installer profiles, inject changing system themes and check text/control contrast in both palettes. These are automated rendering/layout checks, not a claim of a new native screenshot review.
+
+The external updater was exercised against an isolated released 0.8.4 application, upgrading it to the signed public 0.8.5 release and restarting it. New-protocol tests cover an unavailable update server, unchanged presets/completed files, preserved manual/global pauses, and a real 6.4 MB local HTTP video transfer: the restarted app sends a nonzero Range request and the completed bytes match the fixture. The test directories contain synthetic data and never use a personal installation or browser cookies.
+
+After building, run the isolated updater check (the output directory must not already exist):
+
+```powershell
+python scripts/check-update.py --app "Standalone/WorkFlow Media.exe" --updater "Updater/WorkFlow Media Update.exe" --output-dir qa/update-check
+```
+
+Add `--offline` to verify recovery from a network failure, or `--media PATH_TO_SYNTHETIC_MP4` to exercise cancellation and resume against the local test server. `--show-progress` checks the native progress dialog on a successful update. Run these variants in separate output directories. The check uses the real signed stable GitHub channel; it cannot publish an update or change the channel.
+
 Version 0.8.5 adds a recipient-installer regression test: only the small stub and portable profile are written, repeat exports do not grow, oversized/invalid stubs are rejected without damaging an existing output, and a missing embedded downloader cannot fall back to the full app. Release checks measure the actual generated EXE (under 5 MiB) and run it against the signed GitHub channel in an isolated recipient directory. The new installer uses a native Windows progress dialog; the installation test skips UAC and the progress UI.
 
 After `build-windows.ps1`, run the actual-package check on Windows with Python 3:

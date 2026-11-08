@@ -2,7 +2,7 @@
 
 Aplikace běží v jediné instanci pro daný uživatelský profil. Opětovné otevření EXE zobrazí už běžící okno, i když je schované u hodin.
 
-Samostatná aplikace v Rustu pro stahování a správu médií. Rozhraní je česky i anglicky.
+Samostatná aplikace v Rustu pro stahování a správu médií. Rozhraní je česky i anglicky. V Nastavení a v obou průvodcích vyberete vlastní **Tmavý / Světlý** motiv; barvy se nepřebírají ze systému. Volba se uloží i do předvolby generované instalace.
 
 [Stáhnout aplikaci pro Windows](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Windows-x64.exe) · [Kompilace Linuxu](BUILD-LINUX.cs.md)
 
@@ -21,6 +21,12 @@ Stačí jeden EXE soubor. Při prvním otevření vás průvodce provede nastave
 Rozhraní, fronta, FastShare, instalátor i aktualizace zůstávají v Rustu. Média nově stahuje yt-dlp, YouTube JavaScript zpracovává Deno a spojování obrazu se zvukem a tvorbu MP3 zajišťuje FFmpeg. Windows EXE obsahuje všechny tyto nástroje. Při prvním použití je rozbalí do své datové složky; není potřeba je ručně instalovat. Kvůli přibaleným nástrojům je EXE větší.
 
 Živě bylo ověřeno YouTube MP4, MKV a MP3. Dostupnost příspěvků na dalších službách závisí na jejich aktuálních pravidlech a přihlašování. MP3 nyní podporuje i převod zvuku z Opusu. DRM se neobchází. Více podrobností obsahuje [anglická dokumentace](README.md).
+
+## Okamžitá aktualizace
+
+[Stáhnout malý aktualizační EXE](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Update-Windows-x64.exe). Spusťte jej, když aplikace běží, klidně i schovaná u hodin. Uloží a zastaví přenosy, ověří aktuální vydání z GitHubu, aktualizuje a restartuje aplikaci bez potvrzovacího dotazu. Potom obnoví přerušené úlohy. Ručně pozastavené úlohy i pozastavená fronta zůstanou pozastavené. Nastavení a soubory zůstávají zachované.
+
+Aktualizátor neobsahuje velké nástroje médií; plnou aplikaci stáhne až při spuštění. Při chybě stažení spustí původní verzi a oznámí chybu. Pokud se aplikaci nepodaří řádně ukončit, její EXE nenahradí. U starších verzí 0.8.0–0.8.5 může krátce probliknout původní ukončovací dialog; od 0.8.6 funguje přímé předání. Spouštějte aktualizátor pod stejným účtem a se stejnými oprávněními jako aplikaci.
 
 ## Instalace pro dalšího člověka
 

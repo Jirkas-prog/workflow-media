@@ -2,6 +2,7 @@
 /.build/
 /Standalone/
 /SetupBuilder/
+/Updater/
 /qa/
 /resources/tools.zip
 /resources/setup-stub.exe

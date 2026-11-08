@@ -1,15 +1,18 @@
 # WorkFlow Media
 
-A Rust desktop downloader with a dark interface, a download queue and a separate media library. English and Czech are available in the setup guide and Settings.
+A Rust desktop downloader with built-in dark and light themes, a download queue and a separate media library. English and Czech are available in the setup guide and Settings.
 
 [![Download for Windows](https://img.shields.io/badge/DOWNLOAD_FOR_WINDOWS-PORTABLE_EXE-c4fa67?style=for-the-badge&logo=windows&logoColor=152731)](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Windows-x64.exe)
 
 [![Download Setup Builder](https://img.shields.io/badge/SETUP_BUILDER-WINDOWS_EXE-86c8db?style=for-the-badge&logo=windows&logoColor=152731)](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Setup-Builder-Windows-x64.exe)
 
+[![Download update helper](https://img.shields.io/badge/UPDATE_EXISTING_APP-SMALL_EXE-86c8db?style=for-the-badge)](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Update-Windows-x64.exe)
+
 [Česky](README.cs.md) · [Setup Builder guide](SETUP-BUILDER.md) · [Linux build guide](BUILD-LINUX.md) · [Build and release](BUILD.md) · [Test coverage](TESTING.md) · [Licenses](THIRD-PARTY.md)
 
 ## Features
 
+- App-owned light/dark palettes, independent of Windows/Linux system colors. Choose **Application theme** in Settings or either setup guide; old presets default to Dark.
 - Native Rust UI using egui/eframe, including menus, scrollbars, vector navigation icons and a virtualized table.
 - MP4/MKV video and MP3 audio, best available quality by default, with individual service presets.
 - YouTube, Facebook, Instagram, TikTok, Vimeo and other sites supported by yt-dlp; separate Rust FastShare account/search/downloads.
@@ -29,6 +32,12 @@ Download the portable x64 EXE into a writable folder and open it. The initial gu
 The Windows download is one executable. On the first media operation it extracts the bundled tools into a versioned `tools` folder in its user-data directory; this takes a few seconds. Later operations reuse the verified cache. Only the main application includes these media tools. Setup Builder creates a separate recipient installer of approximately **4 MB** containing the downloader and chosen settings; the full app is downloaded at installation time. The app creates `WorkFlow Media.preset.json` beside itself and stores the queue/library separately in the user's application-data directory. Completed downloads stay in the selected destination. Interrupted media streams are kept in `.workflow-partials` inside that destination for resume.
 
 FastShare username, password and session are encrypted with Windows DPAPI. They are not placed in the portable preset. **Sign out and forget** removes the stored credentials. On Linux the application uses Secret Service; without an available, unlocked keyring it reports a storage error instead of saving the password in plain text.
+
+## Update an existing installation immediately
+
+Download the **small update helper** above and run it while WorkFlow Media is running, including when it is hidden in the tray. It saves and stops the queue, checks the signed stable GitHub release, replaces the application and restarts it without a confirmation prompt. Only then do interrupted and queued downloads continue. Manually paused jobs and a globally paused queue remain paused. Settings, credentials, completed files and partial downloads are retained.
+
+The helper contains no media tools; it downloads the full application during the update. It never downgrades a newer installation. A download/verification failure restarts the previous app and reports the error. If the app cannot stop safely, no executable is replaced. Rust versions 0.8.0–0.8.5 use a compatibility adapter for their existing Quit dialog (which can appear briefly); 0.8.6 and newer use direct cooperative shutdown. The app and helper must run as the same Windows user at the same privilege level. See [update details](UPDATE.md).
 
 ## Prepare an installation for someone else
 

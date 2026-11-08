@@ -11,11 +11,11 @@ cargo test --locked
 ./build-windows.ps1
 ```
 
-The results are `Standalone/WorkFlow Media.exe` and `SetupBuilder/WorkFlow Media Setup Builder.exe`. Close an older copy before overwriting its output file. See [SETUP-BUILDER.md](SETUP-BUILDER.md) for the installer workflow. The script statically links the C runtime, removes developer source paths and embeds fonts, icon, help and license notices. It runs `prepare-tools.ps1`, which downloads pinned Windows x64 tools from the official yt-dlp/Deno releases and the FFmpeg-Builds project, verifies the hashes in `resources/tools-lock.json`, and embeds their compressed bundle. A plain `cargo build` without that bundle is useful for UI/unit tests but cannot download media on Windows. Release builds must use the supplied script. Windows system DLLs and a working graphics driver are still required.
+The results are `Standalone/WorkFlow Media.exe` , `SetupBuilder/WorkFlow Media Setup Builder.exe` and `Updater/WorkFlow Media Update.exe`. Close an older copy before overwriting its output file. See [SETUP-BUILDER.md](SETUP-BUILDER.md) for the installer workflow. The script statically links the C runtime, removes developer source paths and embeds fonts, icon, help and license notices. It runs `prepare-tools.ps1`, which downloads pinned Windows x64 tools from the official yt-dlp/Deno releases and the FFmpeg-Builds project, verifies the hashes in `resources/tools-lock.json`, and embeds their compressed bundle. A plain `cargo build` without that bundle is useful for UI/unit tests but cannot download media on Windows. Release builds must use the supplied script. Windows system DLLs and a working graphics driver are still required.
 
 For Linux see [BUILD-LINUX.md](BUILD-LINUX.md).
 
-The Windows script builds three targets in order: the small `workflow-setup` downloader (`--features setup-stub`), the graphical builder without media tools (`--features setup-builder`), and the full `workflow-media` application. The ignored `resources/setup-stub.exe` is generated from source and embedded into both app and builder. Generated installers are limited to 5 MiB including the profile. Do not publish a builder exported from an ordinary full-app build: use the `SetupBuilder` output of the script.
+The Windows script builds four targets in order: the small `workflow-update` helper (`--features update-helper`), the small `workflow-setup` downloader (`--features setup-stub`), the graphical builder without media tools (`--features setup-builder`), and the full `workflow-media` application. The ignored `resources/setup-stub.exe` is generated from source and embedded into both app and builder. Generated installers are limited to 5 MiB including the profile. Do not publish a builder exported from an ordinary full-app build: use the `SetupBuilder` output of the script.
 
 ## Signed application updates
 
@@ -31,10 +31,10 @@ For an independent fork, generate a cryptographically random 32-byte private key
 For each release, increase the Cargo package version and rebuild. Copy the executable to `WorkFlow-Media-Windows-x64.exe`, then sign that exact asset:
 
 ```powershell
-& './Standalone/WorkFlow Media.exe' --sign-release --key PRIVATE_KEY_FILE --release-version 0.8.2 --file WorkFlow-Media-Windows-x64.exe --output update-windows-x86_64.json
+& './Standalone/WorkFlow Media.exe' --sign-release --key PRIVATE_KEY_FILE --release-version 0.8.6 --file WorkFlow-Media-Windows-x64.exe --output update-windows-x86_64.json
 ```
 
-Publish both files in the stable `v0.8.2` GitHub release. Also publish the builder as `WorkFlow-Media-Setup-Builder-Windows-x64.exe` and include both EXE hashes in `SHA256SUMS.txt`. Never publish personal generated installers or profiles. The manifest signs version, target, immutable release URL and SHA-256. An altered manifest or binary is refused. A failed lookup reports an error; it is not presented as a successful update check. Never replace an already published version's binary with different bytes.
+Publish both files in the stable `v0.8.6` GitHub release. Also publish the builder as `WorkFlow-Media-Setup-Builder-Windows-x64.exe` and publish the helper as `WorkFlow-Media-Update-Windows-x64.exe` and include all three EXE hashes in `SHA256SUMS.txt`. Never publish personal generated installers or profiles. The manifest signs version, target, immutable release URL and SHA-256. An altered manifest or binary is refused. A failed lookup reports an error; it is not presented as a successful update check. Never replace an already published version's binary with different bytes.
 
 Automatic checks run once per day. Installation waits for an idle queue, pauses active work on manual restart, verifies the downloaded helper again, preserves a `.previous` copy and restarts with the same data/preset locations. Do not rotate the public key without an update-key migration plan: installed clients trust their embedded key.
 

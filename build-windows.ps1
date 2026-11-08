@@ -8,6 +8,12 @@ try {
     $flags = @('-C','target-feature=+crt-static',"--remap-path-prefix=$PSScriptRoot=.","--remap-path-prefix=$cargoRoot=cargo")
     $oldFlags = $env:CARGO_ENCODED_RUSTFLAGS
     $env:CARGO_ENCODED_RUSTFLAGS = $flags -join [char]31
+    cargo build --release --locked --target $Target --bin workflow-update --features update-helper
+    if ($LASTEXITCODE -ne 0) { throw 'Update helper build failed' }
+    $update = "target\$Target\release\workflow-update.exe"
+    if ((Get-Item -LiteralPath $update).Length -gt 5MB) { throw 'Update helper exceeds 5 MiB' }
+    New-Item -ItemType Directory -Force -Path 'Updater' | Out-Null
+    Copy-Item -LiteralPath $update -Destination 'Updater\WorkFlow Media Update.exe' -Force
     cargo build --release --locked --target $Target --bin workflow-setup --features setup-stub
     if ($LASTEXITCODE -ne 0) { throw 'Setup downloader build failed' }
     $stub = "target\$Target\release\workflow-setup.exe"

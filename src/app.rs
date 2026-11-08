@@ -1,8 +1,7 @@
 use crate::{
     engine::Engine,
     model::{self, ClipboardMode, Job, JobState, Preset, Settings, State, tr},
-    platform,
-    style::{self, BLUE, GREEN, LIME, MUTED, RED},
+    platform, style,
     tray::{self, Action},
     updater,
 };
@@ -127,6 +126,10 @@ pub struct App {
     exit_ready: bool,
 }
 impl App {
+    fn colors(&self) -> &'static style::Palette {
+        style::palette(self.settings.theme)
+    }
+
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         engine: Engine,
@@ -138,9 +141,9 @@ impl App {
         initial_signal: Option<String>,
         builder: bool,
     ) -> Self {
-        style::apply(&cc.egui_ctx);
         let state = engine.snapshot();
         let settings = state.settings.clone();
+        style::apply(&cc.egui_ctx, settings.theme);
         let (tx, rx) = std::sync::mpsc::channel();
         let (tray_tx, tray_rx) = std::sync::mpsc::channel();
         let wake = platform::WindowWake::new(cc);
@@ -628,6 +631,12 @@ impl App {
                 self.show(ctx);
             }
             self.show_signal = signal;
+            if !self.builder && crate::maintenance::shutdown_requested(&self.data) {
+                // An external updater owns the replacement; do not launch a second one.
+                self.update_file = None;
+                self.update_auto = false;
+                self.quit(ctx);
+            }
         }
         if self.setup.is_none()
             && !self.preview
@@ -678,15 +687,19 @@ impl App {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(15, 30, 39))
+                    .fill(self.colors().sidebar)
                     .inner_margin(20),
             )
             .show(ctx, |ui| {
                 ui.add_space(10.);
                 let (rect, _) = ui.allocate_exact_size(Vec2::new(38., 42.), egui::Sense::hover());
-                style::logo(ui.painter(), rect.center(), 29., LIME);
+                style::logo(ui.painter(), rect.center(), 29., self.colors().accent);
                 ui.label(RichText::new("WorkFlow").size(28.).strong());
-                ui.label(RichText::new("M E D I A").size(12.).color(LIME));
+                ui.label(
+                    RichText::new("M E D I A")
+                        .size(12.)
+                        .color(self.colors().accent),
+                );
                 ui.add_space(33.);
                 for (page, cs, en, icon) in [
                     (
@@ -733,7 +746,7 @@ impl App {
                             "Nejvyšší kvalita.\nPod vaší kontrolou.",
                             "Highest quality.\nYour choice.",
                         ))
-                        .color(MUTED)
+                        .color(self.colors().muted)
                         .size(13.),
                     );
                     ui.add_space(8.);
@@ -751,7 +764,7 @@ impl App {
     }
     fn input_card(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
-        style::card().inner_margin(14).show(ui, |ui| {
+        style::card(ui).inner_margin(14).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 7.;
             ui.horizontal(|ui| {
                 ui.label(
@@ -831,16 +844,20 @@ impl App {
         p.rect(
             rect,
             10.,
-            style::PANEL,
-            egui::Stroke::new(1.0_f32, style::LINE),
+            self.colors().panel,
+            egui::Stroke::new(1.0_f32, self.colors().line),
             egui::StrokeKind::Inside,
         );
         let width = rect.width() / 3.;
         let mut accessible = Vec::new();
         for (i, (label, n, color)) in [
-            (self.t("Právě se stahuje", "Downloading"), active, LIME),
-            (self.t("Ve frontě", "Queued"), queued, BLUE),
-            (self.t("Dokončeno", "Completed"), done, GREEN),
+            (
+                self.t("Právě se stahuje", "Downloading"),
+                active,
+                self.colors().accent,
+            ),
+            (self.t("Ve frontě", "Queued"), queued, self.colors().blue),
+            (self.t("Dokončeno", "Completed"), done, self.colors().green),
         ]
         .iter()
         .enumerate()
@@ -852,13 +869,13 @@ impl App {
                         egui::pos2(x, rect.top() + 15.),
                         egui::pos2(x, rect.bottom() - 15.),
                     ],
-                    egui::Stroke::new(1.0_f32, style::LINE),
+                    egui::Stroke::new(1.0_f32, self.colors().line),
                 );
             }
             let name = p.layout_no_wrap(
                 format!("{label}:"),
                 egui::FontId::proportional(18.),
-                style::TEXT,
+                self.colors().text,
             );
             let number = p.layout_no_wrap(n.to_string(), egui::FontId::proportional(27.), *color);
             let name_width = name.size().x;
@@ -866,7 +883,7 @@ impl App {
             p.galley(
                 egui::pos2(start, rect.center().y - name.size().y / 2.),
                 name,
-                style::TEXT,
+                self.colors().text,
             );
             p.galley(
                 egui::pos2(
@@ -893,8 +910,8 @@ impl App {
             self.metrics(ui);
             ui.add_space(8.);
         }
-        style::card()
-            .fill(style::PANEL)
+        style::card(ui)
+            .fill(self.colors().panel)
             .inner_margin(12)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -1000,10 +1017,10 @@ impl App {
         let header_rect =
             egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 36.));
         ui.painter()
-            .rect_filled(header_rect, 4., Color32::from_rgb(16, 33, 42));
+            .rect_filled(header_rect, 4., self.colors().header);
         ui.painter().line_segment(
             [header_rect.left_bottom(), header_rect.right_bottom()],
-            egui::Stroke::new(1.0_f32, style::LINE),
+            egui::Stroke::new(1.0_f32, self.colors().line),
         );
         let mut table = TableBuilder::new(ui)
             .id_salt(if library {
@@ -1050,7 +1067,10 @@ impl App {
                                 ui.label(source_label(&job.source, &lang));
                             }
                             "State" => {
-                                ui.colored_label(state_color(job.state), job.state.label(&lang));
+                                ui.colored_label(
+                                    state_color(job.state, self.settings.theme),
+                                    job.state.label(&lang),
+                                );
                             }
                             "Progress" => {
                                 if job.state == JobState::Completed {
@@ -1151,7 +1171,7 @@ impl App {
                                         "Odstranit soubor z disku…",
                                         "Delete file from disk…",
                                     ))
-                                    .color(RED),
+                                    .color(self.colors().red),
                                 ),
                             )
                             .clicked()
@@ -1183,7 +1203,7 @@ impl App {
                 ui.add(
                     egui::Label::new(
                         RichText::new(model::message(&lang, &j.message))
-                            .color(MUTED)
+                            .color(self.colors().muted)
                             .size(12.),
                     )
                     .truncate(),
@@ -1267,7 +1287,7 @@ impl App {
                                 "Clear list…"
                             },
                         ))
-                        .color(RED),
+                        .color(self.colors().red),
                     ),
                 )
                 .clicked()
@@ -1315,8 +1335,7 @@ impl App {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
         });
         if response.hovered() || response.has_focus() {
-            ui.painter()
-                .rect_filled(rect, 2., Color32::from_rgb(34, 57, 68));
+            ui.painter().rect_filled(rect, 2., self.colors().hover);
         }
         let arrow = if self.sort == asc {
             "↑"
@@ -1330,7 +1349,11 @@ impl App {
             egui::Align2::LEFT_CENTER,
             format!("{label}  {arrow}"),
             egui::FontId::proportional(12.),
-            if active { LIME } else { MUTED },
+            if active {
+                self.colors().accent
+            } else {
+                self.colors().muted
+            },
         );
         let popup = egui::Popup::menu(&response)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
@@ -1496,12 +1519,13 @@ impl App {
     }
 }
 
-fn state_color(state: JobState) -> Color32 {
+fn state_color(state: JobState, theme: model::Theme) -> Color32 {
+    let c = style::palette(theme);
     match state {
-        JobState::Completed => LIME,
-        JobState::Failed => RED,
-        JobState::Downloading | JobState::Processing => BLUE,
-        _ => MUTED,
+        JobState::Completed => c.accent,
+        JobState::Failed => c.red,
+        JobState::Downloading | JobState::Processing => c.blue,
+        _ => c.muted,
     }
 }
 fn source_label<'a>(source: &'a str, lang: &str) -> &'a str {
@@ -1644,6 +1668,9 @@ impl App {
         egui::Grid::new("installer-summary")
             .spacing([24., 12.])
             .show(ui, |ui| {
+                ui.label(tr(&lang, "Motiv aplikace", "Application theme"));
+                ui.label(self.settings.theme.label(&lang));
+                ui.end_row();
                 ui.label(tr(&lang, "Stahování", "Downloads"));
                 ui.label(format!(
                     "{} / {}",
@@ -1716,7 +1743,7 @@ impl App {
         if let Some(path) = &self.created_installer {
             ui.add_space(16.);
             ui.colored_label(
-                LIME,
+                self.colors().accent,
                 tr(&lang, "Instalační soubor vytvořen", "Installer created"),
             );
             ui.add(egui::Label::new(path.display().to_string()).wrap());
@@ -1797,8 +1824,10 @@ impl App {
 
     fn general_settings(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
+        let previous_theme = self.settings.theme;
         ui.horizontal_wrapped(|ui| {
-            ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.x = 20.;
+            ui.allocate_ui(Vec2::new(175., 62.), |ui| {
                 ui.label(tr(&lang, "Jazyk aplikace", "Application language"));
                 egui::ComboBox::from_id_salt("language")
                     .selected_text(if lang == "cs" { "Čeština" } else { "English" })
@@ -1807,8 +1836,21 @@ impl App {
                         ui.selectable_value(&mut self.settings.language, "en".into(), "English");
                     });
             });
-            ui.add_space(20.);
-            ui.vertical(|ui| {
+            ui.allocate_ui(Vec2::new(175., 62.), |ui| {
+                ui.label(tr(&lang, "Motiv aplikace", "Application theme"));
+                egui::ComboBox::from_id_salt("application-theme")
+                    .selected_text(self.settings.theme.label(&lang))
+                    .show_ui(ui, |ui| {
+                        for theme in [model::Theme::Dark, model::Theme::Light] {
+                            ui.selectable_value(
+                                &mut self.settings.theme,
+                                theme,
+                                theme.label(&lang),
+                            );
+                        }
+                    });
+            });
+            ui.allocate_ui(Vec2::new(175., 62.), |ui| {
                 ui.label(tr(&lang, "Souběžná stahování", "Parallel downloads"));
                 egui::ComboBox::from_id_salt("parallel")
                     .height(320.)
@@ -1820,6 +1862,10 @@ impl App {
                     });
             });
         });
+        if self.settings.theme != previous_theme {
+            style::select(ui.ctx(), self.settings.theme);
+            ui.ctx().request_discard("Application theme changed");
+        }
         ui.add_space(8.);
         ui.label(if self.builder {
             tr(
@@ -1993,8 +2039,11 @@ impl App {
                 for source in model::SOURCES {
                     ui.label(source_label(source, &lang));
                     if source == "FastShare" {
-                        ui.colored_label(MUTED, tr(&lang, "Původní soubor", "Original file"));
-                        ui.colored_label(MUTED, tr(&lang, "Originál", "Original"));
+                        ui.colored_label(
+                            self.colors().muted,
+                            tr(&lang, "Původní soubor", "Original file"),
+                        );
+                        ui.colored_label(self.colors().muted, tr(&lang, "Originál", "Original"));
                     } else {
                         let p = self
                             .settings
@@ -2052,7 +2101,7 @@ impl App {
                 self.check_update(ui.ctx(), false);
             }
             if let Some(m) = &self.update {
-                ui.colored_label(LIME, format!("v{}", m.version));
+                ui.colored_label(self.colors().accent, format!("v{}", m.version));
                 if self.update_file.is_none()
                     && ui
                         .add_enabled(
@@ -2085,12 +2134,12 @@ impl App {
                 dot.center(),
                 3.5,
                 if self.engine.fast.logged_in() {
-                    GREEN
+                    self.colors().green
                 } else {
-                    MUTED
+                    self.colors().muted
                 },
             );
-            ui.label(RichText::new(self.engine.fast.account(&lang)).color(MUTED));
+            ui.label(RichText::new(self.engine.fast.account(&lang)).color(self.colors().muted));
         });
         ui.add_space(4.);
         if self.engine.fast.logged_in() {
@@ -2233,6 +2282,7 @@ impl App {
         }
     }
     fn cookie_controls(&mut self, ui: &mut egui::Ui) {
+        let colors = self.colors();
         use model::CookieMode;
         let lang = self.settings.language.clone();
         style::caption(
@@ -2460,7 +2510,7 @@ impl App {
                                 match result {
                                     Ok(count) => {
                                         ui.colored_label(
-                                            GREEN,
+                                            colors.green,
                                             format!(
                                                 "{}: {count}",
                                                 tr(&lang, "Načtené cookies", "Cookies loaded")
@@ -2471,7 +2521,7 @@ impl App {
                                         ui.add(
                                             egui::Label::new(
                                                 RichText::new(model::localized_error(&lang, error))
-                                                    .color(RED),
+                                                    .color(colors.red),
                                             )
                                             .wrap(),
                                         );
@@ -2497,14 +2547,15 @@ impl App {
                     match result {
                         Ok(n) => {
                             ui.colored_label(
-                                GREEN,
+                                colors.green,
                                 format!("{}: {n}", tr(&lang, "Načtené cookies", "Cookies loaded")),
                             );
                         }
                         Err(e) => {
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(model::localized_error(&lang, e)).color(RED),
+                                    RichText::new(model::localized_error(&lang, e))
+                                        .color(colors.red),
                                 )
                                 .wrap(),
                             );
@@ -2569,7 +2620,7 @@ impl App {
         ui.add(egui::Label::new(RichText::new(tr(&lang,
             "Pro videa vyžadující přihlášení použijte vlastní export cookies ve formátu Netscape. Soubor se nikam neodesílá; aplikace jej používá pro příslušné weby.",
             "For videos that require sign-in, select your own Netscape-format cookie export. The application uses these cookies for the corresponding sites."))
-            .size(12.).color(MUTED)).wrap());
+            .size(12.).color(colors.muted)).wrap());
     }
     fn settings_page(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
@@ -2610,7 +2661,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width());
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                style::card().show(ui, |ui| {
+                style::card(ui).show(ui, |ui| {
                     style::title(
                         ui,
                         tr(&lang, "Aplikace a ukládání", "Application and storage"),
@@ -2619,28 +2670,28 @@ impl App {
                     self.general_settings(ui);
                 });
                 ui.add_space(12.);
-                style::card().show(ui, |ui| self.clipboard_settings(ui));
+                style::card(ui).show(ui, |ui| self.clipboard_settings(ui));
                 ui.add_space(12.);
-                style::card().show(ui, |ui| {
+                style::card(ui).show(ui, |ui| {
                     style::title(ui, tr(&lang, "Kvalita a formáty", "Quality and formats"));
                     ui.add_space(8.);
                     self.quality_settings(ui);
                 });
                 ui.add_space(12.);
-                style::card().show(ui, |ui| {
+                style::card(ui).show(ui, |ui| {
                     style::title(ui, tr(&lang, "Účet FastShare", "FastShare account"));
                     self.account_settings(ui);
                 });
                 ui.add_space(12.);
-                style::card().show(ui, |ui| self.cookies_settings(ui));
+                style::card(ui).show(ui, |ui| self.cookies_settings(ui));
                 ui.add_space(12.);
-                style::card().show(ui, |ui| {
+                style::card(ui).show(ui, |ui| {
                     style::title(ui, tr(&lang, "Aktualizace", "Updates"));
                     self.update_settings(ui);
                 });
                 ui.add_space(12.);
                 if cfg!(windows) {
-                    style::card().show(ui, |ui| {
+                    style::card(ui).show(ui, |ui| {
                         style::title(
                             ui,
                             tr(
@@ -2675,7 +2726,7 @@ impl App {
                     });
                     ui.add_space(12.);
                 }
-                style::card().show(ui, |ui| {
+                style::card(ui).show(ui, |ui| {
                     style::title(ui, tr(&lang, "Nápověda a data", "Help and data"));
                     ui.horizontal_wrapped(|ui| {
                         if ui
@@ -2721,7 +2772,7 @@ impl App {
                                 self.preset.display()
                             ))
                             .size(12.)
-                            .color(MUTED),
+                            .color(self.colors().muted),
                         )
                         .wrap(),
                     );
@@ -2747,7 +2798,7 @@ impl App {
                 tr(&lang, "ZE", "OF"),
                 last_step + 1
             ))
-            .color(LIME)
+            .color(self.colors().accent)
             .size(12.)
             .strong(),
         );
@@ -2815,7 +2866,7 @@ impl App {
             ),
         };
         ui.heading(title);
-        ui.colored_label(MUTED, subtitle);
+        ui.colored_label(self.colors().muted, subtitle);
         ui.add_space(20.);
         let height = (ui.available_height() - 85.).max(100.);
         egui::ScrollArea::vertical()
@@ -2823,7 +2874,7 @@ impl App {
             .max_height(height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                style::card().show(ui, |ui| {
+                style::card(ui).show(ui, |ui| {
                     ui.set_min_width((ui.available_width() - 2.).max(0.));
                     match step {
                         0 => {
@@ -2928,7 +2979,7 @@ impl App {
     fn search_page(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
         style::title(ui, tr(&lang, "Hledání na FastShare", "Search FastShare"));
-        style::card().show(ui, |ui| {
+        style::card(ui).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             style::caption(ui, tr(&lang, "VYHLEDÁVÁNÍ SOUBORŮ", "FIND FILES"));
             ui.horizontal(|ui| {
@@ -2986,7 +3037,7 @@ impl App {
             .show_rows(ui, 58., rows.len(), |ui, range| {
                 for index in range {
                     let r = &rows[index];
-                    style::card().inner_margin(9).show(ui, |ui| {
+                    style::card(ui).inner_margin(9).show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.set_width((ui.available_width() - 180.).max(200.));
@@ -3090,7 +3141,7 @@ impl App {
                                         .unwrap_or_else(|| "—".into()),
                                 ),
                             ] {
-                                ui.colored_label(MUTED, label);
+                                ui.colored_label(self.colors().muted, label);
                                 ui.label(value);
                                 ui.end_row();
                             }
@@ -3167,6 +3218,7 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.events(ctx);
+        style::sync(ctx, self.settings.theme);
         if ctx.input(|i| i.viewport().close_requested()) && !self.exit_ready {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if self.setup.is_none() && self.settings.close_to_tray && self.tray.is_some() {
@@ -3181,7 +3233,7 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(16, 31, 40))
+                    .fill(self.colors().sidebar)
                     .inner_margin(egui::Margin::symmetric(20, 9)),
             )
             .show(ctx, |ui| {
@@ -3190,8 +3242,12 @@ impl eframe::App for App {
                         ui.spinner();
                     }
                     ui.add(
-                        egui::Label::new(RichText::new(&self.notice).size(12.).color(MUTED))
-                            .truncate(),
+                        egui::Label::new(
+                            RichText::new(&self.notice)
+                                .size(12.)
+                                .color(self.colors().muted),
+                        )
+                        .truncate(),
                     )
                     .on_hover_text(&self.notice);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3220,7 +3276,7 @@ impl eframe::App for App {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(style::BG)
+                    .fill(self.colors().bg)
                     .inner_margin(if self.setup.is_some() { 32 } else { 22 }),
             )
             .show(ctx, |ui| {
@@ -3313,6 +3369,100 @@ mod tests {
     }
 
     #[test]
+    fn theme_choice_works_in_settings_and_both_guides_without_following_the_os() {
+        fn frame(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) -> egui::FullOutput {
+            ctx.run(
+                egui::RawInput {
+                    system_theme: Some(egui::Theme::Light),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1100., 850.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    style::sync(ctx, app.settings.theme);
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if app.setup.is_some() {
+                            app.wizard(ui);
+                        } else {
+                            app.general_settings(ui);
+                        }
+                    });
+                },
+            )
+        }
+        fn label(output: &egui::FullOutput, text: &str) -> egui::Pos2 {
+            output
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(t) if t.galley.text() == text => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("Missing label {text}"))
+        }
+        fn click(app: &mut App, ctx: &egui::Context, pos: egui::Pos2) -> egui::FullOutput {
+            frame(app, ctx, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    ctx,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+            }
+            frame(app, ctx, vec![])
+        }
+        for lang in ["cs", "en"] {
+            for guide in 0..3 {
+                let dir = tempfile::tempdir().unwrap();
+                let mut app = form_app(dir.path());
+                app.settings.language = lang.into();
+                app.builder = guide == 2;
+                if guide > 0 {
+                    app.begin_setup();
+                }
+                let ctx = egui::Context::default();
+                style::apply(&ctx, model::Theme::Dark);
+                frame(&mut app, &ctx, vec![]);
+                let out = frame(&mut app, &ctx, vec![]);
+                label(&out, tr(lang, "Motiv aplikace", "Application theme"));
+                let pos = label(&out, model::Theme::Dark.label(lang));
+                let out = click(&mut app, &ctx, pos);
+                let pos = label(&out, model::Theme::Light.label(lang));
+                click(&mut app, &ctx, pos);
+                assert_eq!(app.settings.theme, model::Theme::Light);
+                assert_eq!(ctx.theme(), egui::Theme::Light);
+                assert_eq!(ctx.style().visuals.panel_fill, style::LIGHT.bg);
+                let _ = ctx.run(
+                    egui::RawInput {
+                        system_theme: Some(egui::Theme::Dark),
+                        ..Default::default()
+                    },
+                    |_| {},
+                );
+                assert_eq!(ctx.theme(), egui::Theme::Light);
+                frame(&mut app, &ctx, vec![]);
+                assert_eq!(ctx.theme(), egui::Theme::Light);
+                if guide > 0 {
+                    app.cancel_setup();
+                    frame(&mut app, &ctx, vec![]);
+                    assert_eq!(app.settings.theme, model::Theme::Dark);
+                    assert_eq!(ctx.theme(), egui::Theme::Dark);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn name_filter_keeps_focus_while_clicking_typing_and_refreshing_the_table() {
         fn frame(
             app: &mut App,
@@ -3394,7 +3544,7 @@ mod tests {
                     })
                     .collect();
                 let ctx = egui::Context::default();
-                style::apply(&ctx);
+                style::apply(&ctx, app.settings.theme);
                 frame(&mut app, &ctx, library, vec![]);
                 let out = frame(&mut app, &ctx, library, vec![]);
                 let header = label(&out, tr(lang, "NÁZEV", "NAME")).center();
@@ -3485,7 +3635,7 @@ mod tests {
             for width in [480., 720., 1100.] {
                 for section in 0..5 {
                     let ctx = egui::Context::default();
-                    style::apply(&ctx);
+                    style::apply(&ctx, app.settings.theme);
                     let mut bounds = egui::Rect::NOTHING;
                     let input = egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
@@ -3552,7 +3702,7 @@ mod tests {
                 app.settings.language = lang.into();
                 app.settings.cookies_mode = model::CookieMode::All;
                 let ctx = egui::Context::default();
-                style::apply(&ctx);
+                style::apply(&ctx, app.settings.theme);
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -3624,7 +3774,7 @@ mod tests {
                 for mode in [model::CookieMode::Selected, model::CookieMode::All] {
                     app.settings.cookies_mode = mode;
                     let ctx = egui::Context::default();
-                    style::apply(&ctx);
+                    style::apply(&ctx, app.settings.theme);
                     let input = egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,

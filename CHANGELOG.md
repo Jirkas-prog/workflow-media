@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.6
+
+- Added complete built-in Dark and Light palettes, independent of the operating system. Fixed the default light system style replacing dark controls while leaving a dark background. The theme is selectable and saved in Settings, setup and generated recipient installers.
+- Added a small Windows update helper: locate the existing app, save and stop transfers, verify the signed GitHub release, replace/restart, then resume interrupted downloads while preserving manual pauses and settings. Older 0.8.x releases have a bounded tray-dialog compatibility adapter; new releases use process-lifetime-bound shutdown requests.
+- Added theme persistence, contrast, system-theme isolation, setup interaction and queue-resume regression coverage.
+
 ## 0.8.5
 
 - Generated recipient installers now contain a separate small Rust downloader and the portable preset, instead of copying the entire application and its media tools. The downloader is approximately 4 MB; generation and the Windows build enforce a 5 MiB ceiling including the preset.

@@ -19,6 +19,21 @@ pub const SOURCES: [&str; 7] = [
 ];
 pub const QUALITIES: [i32; 9] = [0, 4320, 2160, 1440, 1080, 720, 480, 360, 240];
 pub const MAX_PARALLEL: usize = 16;
+/// An application-owned theme. System colors never select or modify it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+impl Theme {
+    pub fn label(self, lang: &str) -> &'static str {
+        match self {
+            Self::Dark => tr(lang, "Tmavý", "Dark"),
+            Self::Light => tr(lang, "Světlý", "Light"),
+        }
+    }
+}
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CookieMode {
     #[default]
@@ -240,6 +255,7 @@ pub struct Settings {
     pub service_preferences: BTreeMap<String, Preference>,
     pub hidden_columns: Vec<String>,
     pub language: String,
+    pub theme: Theme,
     pub automatic_updates: bool,
 }
 impl Default for Settings {
@@ -272,6 +288,7 @@ impl Default for Settings {
             service_preferences: BTreeMap::new(),
             hidden_columns: vec![],
             language: "cs".into(),
+            theme: Theme::Dark,
             automatic_updates: false,
         }
     }

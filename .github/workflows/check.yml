@@ -24,3 +24,6 @@ jobs:
       - name: Check the Windows installer downloader
         if: runner.os == 'Windows'
         run: cargo check --locked --bin workflow-setup --features setup-stub
+      - name: Test the Windows update helper
+        if: runner.os == 'Windows'
+        run: cargo test --locked --bin workflow-update --features update-helper

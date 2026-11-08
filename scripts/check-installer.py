@@ -21,6 +21,7 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--expected-app", type=Path)
+    parser.add_argument("--theme", choices=("Dark", "Light"), default="Light")
     args = parser.parse_args()
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -33,7 +34,7 @@ def main():
         "Version": 1, "DownloadFolder": "Media",
         "Location": {"Folder": "Documents", "Subfolder": "WorkFlow Media", "Shortcut": "Desktop"},
         "Choices": {
-            "Language": "en", "Parallel": 8, "Format": "MP4", "Quality": 0,
+            "Language": "en", "Theme": args.theme, "Parallel": 8, "Format": "MP4", "Quality": 0,
             "StartWithWindows": False, "CloseToTray": True, "StartOnAdd": True,
             "ClipboardMode": "Selected", "ClipboardSources": ["YouTube", "Facebook", "FastShare"],
             "ServicePreferences": {}, "AutomaticUpdates": True,
@@ -80,7 +81,7 @@ def main():
         app = recipient / "WorkFlow Media.exe"
         preset = json.loads((recipient / "WorkFlow Media.preset.json").read_text(encoding="utf-8"))
         assert preset["SetupCompleted"] is True
-        for key in ("Language", "Parallel", "Format", "Quality", "StartWithWindows", "CloseToTray",
+        for key in ("Language", "Theme", "Parallel", "Format", "Quality", "StartWithWindows", "CloseToTray",
                     "StartOnAdd", "ClipboardMode", "ClipboardSources", "AutomaticUpdates", "CookiesMode",
                     "CookiesBrowsers", "CookiesAutoRefresh"):
             assert preset[key] == profile["Choices"][key], key

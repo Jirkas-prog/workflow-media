@@ -123,6 +123,8 @@ pub struct Choices {
     #[serde(default)]
     pub cookies_browser: Option<model::Browser>,
     pub language: String,
+    #[serde(default)]
+    pub theme: model::Theme,
     pub parallel: usize,
     pub format: String,
     pub quality: i32,
@@ -169,6 +171,7 @@ impl Profile {
                     s.cookies_browsers.clone()
                 },
                 language: s.language.clone(),
+                theme: s.theme,
                 parallel: s.parallel,
                 format: s.format.clone(),
                 quality: s.quality,
@@ -212,6 +215,7 @@ impl Profile {
                 .to_string_lossy()
                 .into_owned(),
             language: c.language.clone(),
+            theme: c.theme,
             parallel: c.parallel,
             format: c.format.clone(),
             quality: c.quality,
@@ -574,7 +578,7 @@ pub fn run(profile: Profile) -> Result<()> {
         "WorkFlow Media Setup",
         options,
         Box::new(move |cc| {
-            style::apply(&cc.egui_ctx);
+            style::apply(&cc.egui_ctx, profile.choices.theme);
             Ok(Box::new(InstallerUi::new(profile, cc.egui_ctx.clone())))
         }),
     )
@@ -629,23 +633,24 @@ impl eframe::App for InstallerUi {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         let lang = self.profile.choices.language.clone();
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(style::BG).inner_margin(28)).show(ctx, |ui| {
+        let c = style::palette(self.profile.choices.theme);
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(c.bg).inner_margin(28)).show(ctx, |ui| {
             style::background(ui);
             ui.heading(tr(&lang, "Instalace WorkFlow Media", "Install WorkFlow Media"));
             ui.add_space(12.);
             style::caption(ui, tr(&lang, "Aplikace se stáhne z GitHubu a spustí s připraveným nastavením.", "The application will download from GitHub and start with your prepared settings."));
             ui.add_space(20.);
-            style::card().show(ui, |ui| {
+            style::card(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 if let Some(result) = &self.result {
                     match result {
                         Ok(installed) => {
-                            ui.colored_label(style::LIME, tr(&lang, "Hotovo. Aplikace je připravená.", "Done. Your application is ready."));
+                            ui.colored_label(c.accent, tr(&lang, "Hotovo. Aplikace je připravená.", "Done. Your application is ready."));
                             ui.add(egui::Label::new(installed.exe.display().to_string()).wrap());
                             if !installed.warning.is_empty() { ui.add(egui::Label::new(&installed.warning).wrap()); }
                             if ui.button(tr(&lang, "Otevřít aplikaci", "Open application")).clicked() { let _ = platform::command(&installed.exe).spawn(); }
                         }
-                        Err(e) => { ui.add(egui::Label::new(egui::RichText::new(model::localized_error(&lang, &format!("{e:#}"))).color(style::RED)).wrap()); }
+                        Err(e) => { ui.add(egui::Label::new(egui::RichText::new(model::localized_error(&lang, &format!("{e:#}"))).color(c.red)).wrap()); }
                     }
                 } else {
                     ui.horizontal(|ui| { ui.spinner(); ui.label(if self.closing { tr(&lang, "Ukončuji instalaci…", "Stopping installation…") } else { self.stage.label(&lang) }); });
@@ -827,6 +832,48 @@ mod tests {
         fs::write(&setup, bytes).unwrap();
         assert!(read_package(&setup).is_err());
     }
+    #[test]
+    fn theme_survives_preset_and_recipient_profile_with_dark_legacy_default() {
+        let dir = tempfile::tempdir().unwrap();
+        for theme in [model::Theme::Dark, model::Theme::Light] {
+            let settings = Settings {
+                theme,
+                ..Default::default()
+            };
+            let path = dir.path().join(PRESET);
+            model::save_json(
+                &path,
+                &Preset {
+                    settings: settings.clone(),
+                    setup_completed: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let preset: Preset = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(preset.settings.theme, theme);
+            let profile =
+                Profile::from_settings(&settings, "Media".into(), Location::default()).unwrap();
+            let bytes = serde_json::to_vec(&profile).unwrap();
+            let loaded: Profile = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(loaded.resolve(dir.path()).unwrap().theme, theme);
+            let mut legacy = serde_json::to_value(profile).unwrap();
+            legacy["Choices"].as_object_mut().unwrap().remove("Theme");
+            assert_eq!(
+                serde_json::from_value::<Profile>(legacy)
+                    .unwrap()
+                    .resolve(dir.path())
+                    .unwrap()
+                    .theme,
+                model::Theme::Dark
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<Settings>("{}").unwrap().theme,
+            model::Theme::Dark
+        );
+    }
+
     #[test]
     fn recipient_installer_is_only_the_stub_and_portable_profile() {
         let dir = tempfile::tempdir().unwrap();
