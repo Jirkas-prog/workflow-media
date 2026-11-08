@@ -1,5 +1,7 @@
 # Validation and test coverage
 
+The 0.8.4 name-filter regression test replays pointer and keyboard events through the actual file table in both English and Czech, for downloads and the library. It reproduced the original click-to-close failure and now checks retained focus during typing, paste, editing and table refreshes, plus Escape, outside/header clicks, clear and sort actions. This adds one ordinary test to the counts below.
+
 The 0.8.2 audit runs 45 ordinary tests on Windows and 43 on Ubuntu 24.04, plus three opt-in Windows integrations using the real media tools. Commands and fixture preparation are in [BUILD.md](BUILD.md#synthetic-multi-profile-test-windows).
 
 | Area | Automated coverage |

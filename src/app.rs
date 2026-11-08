@@ -1332,7 +1332,9 @@ impl App {
             egui::FontId::proportional(12.),
             if active { LIME } else { MUTED },
         );
-        egui::Popup::menu(&response).show(|ui| {
+        let popup = egui::Popup::menu(&response)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+        popup.show(|ui| {
             for (sort, cs, en) in [
                 (asc, "Seřadit vzestupně", "Sort ascending"),
                 (desc, "Seřadit sestupně", "Sort descending"),
@@ -3313,6 +3315,167 @@ mod tests {
             update_checked: Instant::now(),
             quitting: false,
             exit_ready: false,
+        }
+    }
+
+    #[test]
+    fn name_filter_keeps_focus_while_clicking_typing_and_refreshing_the_table() {
+        fn frame(
+            app: &mut App,
+            ctx: &egui::Context,
+            library: bool,
+            events: Vec<egui::Event>,
+        ) -> egui::FullOutput {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(1100., 850.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.files_table(ui, library));
+                },
+            )
+        }
+        fn label(out: &egui::FullOutput, prefix: &str) -> egui::Rect {
+            out.shapes
+                .iter()
+                .find_map(|s| {
+                    if let egui::Shape::Text(t) = &s.shape {
+                        if t.galley.text() == prefix
+                            || t.galley.text().starts_with(&format!("{prefix}  "))
+                        {
+                            return Some(t.galley.rect.translate(t.pos.to_vec2()));
+                        }
+                    }
+                    None
+                })
+                .unwrap_or_else(|| panic!("Missing visible label: {prefix}"))
+        }
+        fn click(
+            app: &mut App,
+            ctx: &egui::Context,
+            library: bool,
+            pos: egui::Pos2,
+        ) -> egui::FullOutput {
+            frame(app, ctx, library, vec![egui::Event::PointerMoved(pos)]);
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    ctx,
+                    library,
+                    vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+            }
+            frame(app, ctx, library, vec![])
+        }
+        fn key(key: egui::Key) -> egui::Event {
+            egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }
+        }
+        for lang in ["cs", "en"] {
+            for library in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let mut app = form_app(dir.path());
+                app.settings.language = lang.into();
+                app.state.jobs = ["Alpha Žluťoučký", "Beta"]
+                    .into_iter()
+                    .map(|title| Job {
+                        title: title.into(),
+                        state: JobState::Completed,
+                        ..Default::default()
+                    })
+                    .collect();
+                let ctx = egui::Context::default();
+                style::apply(&ctx);
+                frame(&mut app, &ctx, library, vec![]);
+                let out = frame(&mut app, &ctx, library, vec![]);
+                let header = label(&out, tr(lang, "NÁZEV", "NAME")).center();
+                let out = click(&mut app, &ctx, library, header);
+                assert!(egui::Popup::is_any_open(&ctx));
+                let caption = label(&out, tr(lang, "Název obsahuje", "Name contains"));
+                let field = egui::pos2(caption.left() + 30., caption.bottom() + 9. + 17.);
+                click(&mut app, &ctx, library, field);
+                assert!(
+                    egui::Popup::is_any_open(&ctx),
+                    "Clicking the input closed the menu ({lang}, library={library})"
+                );
+                let focus = ctx.memory(|m| m.focused());
+                assert!(focus.is_some(), "The input did not receive focus");
+                for text in ["A", "l", "pha", " ", "Ž", "lu"] {
+                    let before = app.filter.query.clone();
+                    frame(
+                        &mut app,
+                        &ctx,
+                        library,
+                        vec![egui::Event::Text(text.into())],
+                    );
+                    assert_eq!(app.filter.query, format!("{before}{text}"));
+                    app.state.jobs[0].percent += 1.;
+                    for _ in 0..3 {
+                        frame(&mut app, &ctx, library, vec![]);
+                    }
+                    assert!(egui::Popup::is_any_open(&ctx), "Typing closed the menu");
+                    assert_eq!(
+                        ctx.memory(|m| m.focused()),
+                        focus,
+                        "Refresh lost input focus"
+                    );
+                }
+                click(&mut app, &ctx, library, field);
+                assert!(egui::Popup::is_any_open(&ctx));
+                assert_eq!(ctx.memory(|m| m.focused()), focus);
+                frame(&mut app, &ctx, library, vec![key(egui::Key::End)]);
+                frame(
+                    &mut app,
+                    &ctx,
+                    library,
+                    vec![egui::Event::Paste(" unmatched".into())],
+                );
+                frame(&mut app, &ctx, library, vec![key(egui::Key::Backspace)]);
+                assert_eq!(app.filter.query, "Alpha Žlu unmatche");
+                frame(&mut app, &ctx, library, vec![]);
+                assert!(egui::Popup::is_any_open(&ctx));
+                assert_eq!(ctx.memory(|m| m.focused()), focus);
+                frame(&mut app, &ctx, library, vec![key(egui::Key::Escape)]);
+                assert!(!egui::Popup::is_any_open(&ctx));
+                click(&mut app, &ctx, library, header);
+                assert!(egui::Popup::is_any_open(&ctx));
+                click(&mut app, &ctx, library, header);
+                assert!(
+                    !egui::Popup::is_any_open(&ctx),
+                    "Clicking the header again must close its menu"
+                );
+                let out = click(&mut app, &ctx, library, header);
+                let clear = label(&out, tr(lang, "Zrušit filtr", "Clear filter")).center();
+                click(&mut app, &ctx, library, clear);
+                assert!(app.filter.query.is_empty());
+                assert!(!egui::Popup::is_any_open(&ctx));
+                let out = click(&mut app, &ctx, library, header);
+                let sort = label(&out, tr(lang, "Seřadit vzestupně", "Sort ascending")).center();
+                click(&mut app, &ctx, library, sort);
+                assert!(app.sort == Sort::NameAsc);
+                assert!(!egui::Popup::is_any_open(&ctx));
+                click(&mut app, &ctx, library, header);
+                click(&mut app, &ctx, library, egui::pos2(1090., 840.));
+                assert!(
+                    !egui::Popup::is_any_open(&ctx),
+                    "An outside click must close the menu"
+                );
+            }
         }
     }
 

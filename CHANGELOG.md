@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.4
+
+- Fixed the name filter closing as soon as its text field was clicked. Column menus now stay open for input; typing, pasting, editing and table refreshes preserve focus. Escape, outside clicks, the header toggle and completed menu actions still close the menu.
+- Added an input-event regression test covering the download table and library in English and Czech, including repeated clicks, live filtering to no matches, paste, cursor movement, backspace and dismissal.
+
 ## 0.8.3
 
 - Replaced download progress bars in the file table with plain percentage text, matching completed rows.
