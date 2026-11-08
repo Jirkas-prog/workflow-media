@@ -4,6 +4,8 @@
 
 Setup Builder is a separate portable Windows x64 EXE. It creates a single installer EXE containing the recipient's preferences. Neither person needs Rust or another runtime installed. The builder works offline; the generated installer requires Internet access to GitHub.
 
+The **generated recipient installer is approximately 4 MB** (under 5 MiB including settings). It contains a small Rust downloader, not the full application or its media tools. The separate graphical Builder is larger than the file it produces. Use Builder 0.8.5 or newer to regenerate older, oversized installers; existing files do not shrink automatically.
+
 ## Prepare the file
 
 1. Open **WorkFlow Media Setup Builder.exe**, or choose **Settings → Open setup builder** in the main app.
@@ -55,15 +57,15 @@ Release-signature verification is separate from Windows Authenticode; the EXEs d
 
 ## Build and development
 
-`build-windows.ps1` produces `Standalone/WorkFlow Media.exe` and `SetupBuilder/WorkFlow Media Setup Builder.exe`. Both modes are native Rust. Generated installers embed a bounded, versioned JSON profile with an integrity checksum. No external scripts or compiler are required at runtime.
+`build-windows.ps1` first compiles `workflow-setup` with `setup-stub`, checks its size and embeds it from the ignored `resources/setup-stub.exe`. It then builds Setup Builder with `setup-builder` (without media tools) and finally the complete app. The results are `Standalone/WorkFlow Media.exe` and `SetupBuilder/WorkFlow Media Setup Builder.exe`. All three components are Rust. Generated installers embed a bounded, versioned JSON profile with an integrity checksum. No external scripts or compiler are required at runtime. A build without the downloader refuses installer generation instead of copying the full app.
 
 The main application also builds on Linux; see [BUILD-LINUX.md](BUILD-LINUX.md). The installer generator targets Windows x64 and must be built and run on Windows.
 
 Headless developer commands:
 
 ```powershell
-./target/debug/workflow-media.exe --export-builder --output builder.exe
-./target/debug/workflow-media.exe --make-installer --profile profile.json --output setup.exe
+./build-windows.ps1
+& './SetupBuilder/WorkFlow Media Setup Builder.exe' --make-installer --profile profile.json --output setup.exe
 ./setup.exe --test-install-to C:\Temp\workflow-install-test
 ```
 

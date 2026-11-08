@@ -1,5 +1,15 @@
 # Validation and test coverage
 
+Version 0.8.5 adds a recipient-installer regression test: only the small stub and portable profile are written, repeat exports do not grow, oversized/invalid stubs are rejected without damaging an existing output, and a missing embedded downloader cannot fall back to the full app. Release checks measure the actual generated EXE (under 5 MiB) and run it against the signed GitHub channel in an isolated recipient directory. The new installer uses a native Windows progress dialog; the installation test skips UAC and the progress UI.
+
+After `build-windows.ps1`, run the actual-package check on Windows with Python 3:
+
+```powershell
+python scripts/check-installer.py --app 'Standalone/WorkFlow Media.exe' --builder 'SetupBuilder/WorkFlow Media Setup Builder.exe' --stub resources/setup-stub.exe --output-dir qa/installer-check
+```
+
+Add `--install` to download and install the current signed public release inside that test directory, without changing the personal app, startup or shortcuts. After publishing, `--expected-app 'Standalone/WorkFlow Media.exe'` also checks byte-for-byte identity with the local release. Both app and builder must generate the same small EXE; a corrupted preset must fail before installation.
+
 The 0.8.4 name-filter regression test replays pointer and keyboard events through the actual file table in both English and Czech, for downloads and the library. It reproduced the original click-to-close failure and now checks retained focus during typing, paste, editing and table refreshes, plus Escape, outside/header clicks, clear and sort actions. This adds one ordinary test to the counts below.
 
 The 0.8.2 audit runs 45 ordinary tests on Windows and 43 on Ubuntu 24.04, plus three opt-in Windows integrations using the real media tools. Commands and fixture preparation are in [BUILD.md](BUILD.md#synthetic-multi-profile-test-windows).

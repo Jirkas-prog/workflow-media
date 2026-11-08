@@ -78,14 +78,14 @@ fn run() -> Result<()> {
         }
         let profile: installer::Profile =
             serde_json::from_slice(&fs::read(arg("--profile").context("Missing --profile")?)?)?;
-        return installer::write_package(
-            &exe,
+        return installer::create_installer(
             &arg("--output").context("Missing --output")?,
-            &installer::Package::Installer(profile),
+            &profile,
         );
     }
     let package = installer::read_package(&exe)?.map(|(_, p)| p);
-    let builder = args.iter().any(|a| a == "--setup-builder")
+    let builder = cfg!(feature = "setup-builder")
+        || args.iter().any(|a| a == "--setup-builder")
         || matches!(package, Some(installer::Package::Builder));
     if builder && !cfg!(windows) {
         bail!("The installer builder targets Windows; the main application also builds on Linux");

@@ -1,7 +1,9 @@
 //! Windows carries its verified helper bundle; Linux uses explicitly installed tools.
+#[cfg(any(not(windows), bundled_tools, test))]
+use anyhow::Context;
+use anyhow::Result;
 #[cfg(any(windows, test))]
 use anyhow::bail;
-use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]

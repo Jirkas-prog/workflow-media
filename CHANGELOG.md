@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.5
+
+- Generated recipient installers now contain a separate small Rust downloader and the portable preset, instead of copying the entire application and its media tools. The downloader is approximately 4 MB; generation and the Windows build enforce a 5 MiB ceiling including the preset.
+- The separate Setup Builder no longer bundles yt-dlp, Deno or FFmpeg. The main single-file application still includes all three tools.
+- Kept signed GitHub downloads, recipient folder selection, prepared settings, startup/shortcut behavior and installation rollback. Added size and packaging regression coverage.
+
 ## 0.8.4
 
 - Fixed the name filter closing as soon as its text field was clicked. Column menus now stay open for input; typing, pasting, editing and table refreshes preserve focus. Escape, outside clicks, the header toggle and completed menu actions still close the menu.

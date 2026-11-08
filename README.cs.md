@@ -24,7 +24,7 @@ Rozhraní, fronta, FastShare, instalátor i aktualizace zůstávají v Rustu. M�
 
 ## Instalace pro dalšího člověka
 
-Samostatný **WorkFlow Media Setup Builder** vás provede pěti kroky. Zvolíte nastavení příjemce a uložíte jeden instalační EXE. Příjemce jej otevře, potvrdí správce a instalátor stáhne aktuální podepsanou aplikaci z GitHubu, uloží připravené nastavení a spustí ji. Potřebuje internet.
+Samostatný **WorkFlow Media Setup Builder** vás provede pěti kroky. Zvolíte nastavení příjemce a uložíte jeden instalační EXE o velikosti přibližně **4 MB**. Obsahuje jen malý Rust stahovač a připravená nastavení. Příjemce jej otevře, potvrdí správce a instalátor stáhne aktuální podepsanou aplikaci z GitHubu, uloží připravené nastavení a spustí ji. Potřebuje internet. Velké multimediální nástroje obsahuje pouze samotná aplikace, nikoli generátor ani vytvořená instalačka.
 
 Výchozí umístění je **Dokumenty → WorkFlow Media**, zástupce se vytvoří na **Ploše**. Obojí lze změnit. Použijí se skutečné systémové složky příjemce, nezávisle na jeho jménu nebo přesměrování do OneDrivu. Hesla, cookies, historie ani vaše osobní soubory se nepřenášejí.
 

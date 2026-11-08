@@ -4,6 +4,7 @@
 /SetupBuilder/
 /qa/
 /resources/tools.zip
+/resources/setup-stub.exe
 *.session
 *.log
 queue.json

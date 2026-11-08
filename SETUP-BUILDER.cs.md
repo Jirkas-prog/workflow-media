@@ -4,6 +4,8 @@
 
 Samostatný **WorkFlow Media Setup Builder.exe** připraví jeden instalační EXE pro příjemce. Není potřeba Rust ani jiný runtime. Generátor funguje bez internetu; příjemce potřebuje internet ke stažení aktuální aplikace z GitHubu.
 
+**Vytvořená instalačka má přibližně 4 MB** a včetně nastavení nesmí překročit 5 MiB. Obsahuje jen malý Rust stahovač. Grafický generátor je větší než soubor, který vytváří. Staré velké instalačky vytvořte znovu generátorem verze 0.8.5 nebo novějším; dříve uložené soubory se samy nezmenší.
+
 ## Příprava
 
 1. Otevřete generátor, případně v aplikaci zvolte **Nastavení → Otevřít generátor instalace**.
@@ -33,6 +35,6 @@ Přenášejí se jen volby nastavení. **Hesla, cookies, přihlašovací relace,
 
 ## Kompilace
 
-`build-windows.ps1` vytvoří aplikaci do `Standalone` a samostatný generátor do `SetupBuilder`. Aplikace a generátor jsou v Rustu; Windows EXE navíc obsahuje nástroje yt-dlp, Deno a FFmpeg pro média. Generování nevyžaduje další kompilátor ani externí skripty.
+`build-windows.ps1` nejprve sestaví malý instalační stahovač a zkontroluje jeho velikost. Potom vytvoří samostatný generátor do `SetupBuilder` a kompletní aplikaci do `Standalone`. Všechny tři části jsou v Rustu. Nástroje yt-dlp, Deno a FFmpeg obsahuje pouze hlavní aplikace. Generování nevyžaduje další kompilátor ani externí skripty. Pokud sestavení neobsahuje stahovač, generování skončí chybou, místo aby kopírovalo velkou aplikaci.
 
 Hlavní aplikaci lze kompilovat i pro Linux podle [návodu](BUILD-LINUX.cs.md). Generátor instalačního EXE je určen pro Windows x64. Technické podrobnosti a izolované testování popisuje [anglický návod](SETUP-BUILDER.md).

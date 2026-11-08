@@ -1623,17 +1623,11 @@ impl App {
         else {
             return;
         };
-        let source = self.exe.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         self.busy += 1;
         std::thread::spawn(move || {
-            let result = crate::installer::write_package(
-                &source,
-                &path,
-                &crate::installer::Package::Installer(profile),
-            )
-            .map(|_| path);
+            let result = crate::installer::create_installer(&path, &profile).map(|_| path);
             let _ = tx.send(Event::Exported(result));
             ctx.request_repaint();
         });
@@ -1645,7 +1639,7 @@ impl App {
             ui,
             tr(&lang, "Co příjemce dostane", "What the recipient gets"),
         );
-        ui.label(tr(&lang, "Jeden EXE: stažení aplikace z GitHubu, ověření podpisu, instalace a hotové nastavení.", "One EXE: download from GitHub, signature verification, installation and prepared settings."));
+        ui.label(tr(&lang, "Malý instalační EXE (do 5 MB): stáhne aplikaci z GitHubu, ověří podpis a provede instalaci s připraveným nastavením.", "Small installer EXE (under 5 MB): downloads the app from GitHub, verifies its signature and installs it with the prepared settings."));
         ui.add_space(12.);
         egui::Grid::new("installer-summary")
             .spacing([24., 12.])

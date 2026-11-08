@@ -22,6 +22,12 @@ use std::{
 const MAGIC: &[u8; 16] = b"WFMEDIA_BUNDLE_1";
 const FOOTER: u64 = 56;
 const MAX_PROFILE: u64 = 65536;
+/// The email attachment must remain a downloader, never a copy of the media application.
+#[cfg(any(bundled_installer, test))]
+pub const MAX_INSTALLER_BYTES: u64 = 5 * 1024 * 1024;
+#[cfg(all(windows, feature = "setup-stub"))]
+#[path = "installer/compact.rs"]
+pub mod compact;
 const APPLICATION: &str = "WorkFlow Media.exe";
 const PRESET: &str = "WorkFlow Media.preset.json";
 
@@ -276,10 +282,17 @@ pub fn read_package(path: &Path) -> Result<Option<(u64, Package)>> {
 }
 
 /// PE executables permit an overlay. Repackaging strips any previous overlay first.
-pub fn write_package(source: &Path, output: &Path, package: &Package) -> Result<()> {
+fn write_package(source: &Path, output: &Path, package: &Package) -> Result<()> {
     if output.exists() && fs::canonicalize(source)? == fs::canonicalize(output)? {
         bail!("Choose a different output file / Vyberte jiný výstupní soubor");
     }
+    let base = read_package(source)?
+        .map(|p| p.0)
+        .unwrap_or(fs::metadata(source)?.len());
+    write_overlay(fs::File::open(source)?.take(base), output, package)
+}
+
+fn write_overlay(mut source: impl Read, output: &Path, package: &Package) -> Result<()> {
     if let Package::Installer(p) = package {
         p.resolve(&std::env::temp_dir())?;
     }
@@ -287,14 +300,11 @@ pub fn write_package(source: &Path, output: &Path, package: &Package) -> Result<
     if payload.len() as u64 > MAX_PROFILE {
         bail!("Installer profile too large");
     }
-    let base = read_package(source)?
-        .map(|p| p.0)
-        .unwrap_or(fs::metadata(source)?.len());
     let output = std::path::absolute(output)?;
     let parent = output.parent().context("Output folder")?;
     fs::create_dir_all(parent)?;
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    std::io::copy(&mut fs::File::open(source)?.take(base), &mut temp)?;
+    std::io::copy(&mut source, &mut temp)?;
     temp.write_all(&payload)?;
     temp.write_all(&(payload.len() as u64).to_le_bytes())?;
     temp.write_all(&Sha256::digest(&payload))?;
@@ -302,6 +312,35 @@ pub fn write_package(source: &Path, output: &Path, package: &Package) -> Result<
     temp.as_file().sync_all()?;
     platform::replace_file(temp.path(), &output)?;
     Ok(())
+}
+
+#[cfg(any(bundled_installer, test))]
+fn package_installer(stub: &[u8], output: &Path, profile: &Profile) -> Result<()> {
+    // Leave room for the largest permitted preset, so future choices cannot grow the EXE.
+    if !stub.starts_with(b"MZ") || stub.len() as u64 > MAX_INSTALLER_BYTES - MAX_PROFILE - FOOTER {
+        bail!("Invalid or oversized setup stub; rebuild using build-windows.ps1");
+    }
+    if output.exists() && fs::canonicalize(std::env::current_exe()?)? == fs::canonicalize(output)? {
+        bail!("Choose a different output file / Vyberte jiný výstupní soubor");
+    }
+    write_overlay(stub, output, &Package::Installer(profile.clone()))
+}
+
+/// Embed only the small Rust downloader and the portable preset in the recipient's EXE.
+pub fn create_installer(output: &Path, profile: &Profile) -> Result<()> {
+    #[cfg(bundled_installer)]
+    return package_installer(
+        include_bytes!("../resources/setup-stub.exe"),
+        output,
+        profile,
+    );
+    #[cfg(not(bundled_installer))]
+    {
+        let _ = (output, profile);
+        bail!(
+            "Setup downloader missing / Chybí instalační stahovač. Build using build-windows.ps1"
+        );
+    }
 }
 
 pub fn export_builder(output: &Path) -> Result<()> {
@@ -788,6 +827,44 @@ mod tests {
         fs::write(&setup, bytes).unwrap();
         assert!(read_package(&setup).is_err());
     }
+    #[test]
+    fn recipient_installer_is_only_the_stub_and_portable_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("setup.exe");
+        let profile =
+            Profile::from_settings(&Settings::default(), "Media".into(), Location::default())
+                .unwrap();
+        let stub = b"MZ-small-downloader";
+        package_installer(stub, &output, &profile).unwrap();
+        let first = fs::read(&output).unwrap();
+        let (base, package) = read_package(&output).unwrap().unwrap();
+        assert_eq!(base, stub.len() as u64);
+        assert_eq!(&first[..base as usize], stub);
+        assert!(matches!(package, Package::Installer(_)));
+        assert!(first.len() as u64 <= MAX_INSTALLER_BYTES);
+        // Repeated exports do not accumulate old application/profile bytes.
+        package_installer(stub, &output, &profile).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), first);
+        assert!(package_installer(b"not-an-executable", &output, &profile).is_err());
+        let mut oversized = vec![0; (MAX_INSTALLER_BYTES - MAX_PROFILE - FOOTER + 1) as usize];
+        oversized[..2].copy_from_slice(b"MZ");
+        assert!(package_installer(&oversized, &output, &profile).is_err());
+        assert_eq!(fs::read(&output).unwrap(), first);
+        #[cfg(bundled_installer)]
+        {
+            create_installer(&output, &profile).unwrap();
+            let (base, _) = read_package(&output).unwrap().unwrap();
+            assert_eq!(
+                base,
+                include_bytes!("../resources/setup-stub.exe").len() as u64
+            );
+            assert!(fs::metadata(&output).unwrap().len() <= MAX_INSTALLER_BYTES);
+            assert!(create_installer(&std::env::current_exe().unwrap(), &profile).is_err());
+        }
+        #[cfg(not(bundled_installer))]
+        assert!(create_installer(&output, &profile).is_err());
+    }
+
     #[test]
     fn install_writes_completed_preset_and_rolls_back_failure() {
         let dir = tempfile::tempdir().unwrap();

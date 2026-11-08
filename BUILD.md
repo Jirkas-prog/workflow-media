@@ -15,6 +15,8 @@ The results are `Standalone/WorkFlow Media.exe` and `SetupBuilder/WorkFlow Media
 
 For Linux see [BUILD-LINUX.md](BUILD-LINUX.md).
 
+The Windows script builds three targets in order: the small `workflow-setup` downloader (`--features setup-stub`), the graphical builder without media tools (`--features setup-builder`), and the full `workflow-media` application. The ignored `resources/setup-stub.exe` is generated from source and embedded into both app and builder. Generated installers are limited to 5 MiB including the profile. Do not publish a builder exported from an ordinary full-app build: use the `SetupBuilder` output of the script.
+
 ## Signed application updates
 
 The update channel is `Jirkas-prog/workflow-media` on GitHub Releases. Keep the existing signing key private and backed up; never commit it. The public Ed25519 key is compiled from `resources/update-key.hex`. Only that public key belongs in Git.
