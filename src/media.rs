@@ -112,7 +112,7 @@ pub fn download(
         |settings, identity| download_one(job, settings, identity, cancel, &progress),
     )
 }
-fn download_one(
+pub(crate) fn download_one(
     job: &Job,
     settings: &Settings,
     identity: &str,
@@ -137,17 +137,7 @@ fn download_one(
         base.join(identity)
     };
     fs::create_dir_all(&partial)?;
-    let mut s = settings.clone();
-    // yt-dlp may update a Netscape file. Keep the user's original export unchanged.
-    let cookie_copy = if s.cookies_browser.is_none() && !s.cookies_file.is_empty() {
-        let file = tempfile::NamedTempFile::new()?;
-        fs::copy(&s.cookies_file, file.path())?;
-        s.cookies_file = file.path().to_string_lossy().into_owned();
-        Some(file)
-    } else {
-        None
-    };
-    let mut c = command(&t, &s)?;
+    let mut c = command(&t, settings)?;
     c.args([
         "--no-simulate",
         "--no-overwrites",
@@ -193,7 +183,6 @@ fn download_one(
             progress(p);
         }
     })?;
-    drop(cookie_copy);
     if cancel.load(Ordering::Relaxed) {
         bail!("@cancelled");
     }

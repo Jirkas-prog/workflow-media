@@ -342,7 +342,12 @@ fn snapshot(
     let cached = read_snapshot(&path);
     if !force {
         if let Some(s) = &cached {
-            if !automatic || now().saturating_sub(s.captured.max(s.last_refresh)) < 60 {
+            let last_refresh = if s.last_refresh == 0 {
+                s.captured
+            } else {
+                s.last_refresh
+            };
+            if !automatic || now().checked_sub(last_refresh).is_some_and(|age| age < 60) {
                 return Ok(s.clone());
             }
         }
@@ -420,15 +425,51 @@ pub fn forget() -> Result<()> {
     Ok(())
 }
 pub fn is_access_error(error: &anyhow::Error) -> bool {
+    // Local I/O failures must not be retried with another identity.
+    if error
+        .chain()
+        .any(|e| e.downcast_ref::<std::io::Error>().is_some())
+    {
+        return false;
+    }
     let text = format!("{error:#}").to_ascii_lowercase();
+    // Match status messages, not digits inside a video ID, URL or filename.
+    let status = |code: &str| {
+        [
+            "http error ",
+            "http status ",
+            "status code ",
+            "status code: ",
+            "http status client error (",
+        ]
+        .iter()
+        .any(|prefix| {
+            let needle = format!("{prefix}{code}");
+            text.match_indices(&needle).any(|(index, _)| {
+                !text[index + needle.len()..].starts_with(|c: char| c.is_ascii_digit())
+            })
+        })
+    };
+    if status("429") {
+        return false;
+    }
     if [
-        "429",
         "too many requests",
         "timed out",
-        "connection",
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "unable to connect",
+        "failed to resolve",
         "network is unreachable",
         "no space",
         "permission denied",
+        "access is denied",
+        "unable to open for writing",
+        "postprocessing:",
+        "ffmpeg not found",
+        "ffprobe not found",
+        "no such file or directory",
         "@cancelled",
     ]
     .iter()
@@ -436,20 +477,35 @@ pub fn is_access_error(error: &anyhow::Error) -> bool {
     {
         return false;
     }
+    if status("401") || status("403") {
+        return true;
+    }
     [
-        "403",
-        "401",
-        "login",
+        "login required",
+        "login-required",
+        "logged in",
         "log in",
         "sign in",
-        "private",
-        "not available",
-        "unavailable",
-        "not found",
+        "private video",
+        "private media",
+        "private content",
+        "private account",
+        "video is private",
+        "video unavailable",
+        "video is unavailable",
+        "content is not available",
+        "content isn't available",
+        "video is not available",
+        "video not found",
+        "members-only",
+        "members only",
         "authentication",
         "access denied",
+        "do not have permission",
         "authorized",
-        "cookie",
+        "cookies are no longer valid",
+        "cookies are not valid",
+        "fresh cookies",
     ]
     .iter()
     .any(|s| text.contains(s))
@@ -486,6 +542,14 @@ pub fn with_auth<T>(
     mut run: impl FnMut(&Settings, &str) -> Result<T>,
 ) -> Result<T> {
     if !settings.uses_browser_cookies() {
+        if !settings.cookies_file.is_empty() {
+            // Both inspection and downloading may update a jar; preserve the user's export.
+            let file = tempfile::NamedTempFile::new()?;
+            fs::copy(&settings.cookies_file, file.path())?;
+            let mut configured = settings.clone();
+            configured.cookies_file = file.path().to_string_lossy().into_owned();
+            return run(&configured, "default");
+        }
         return run(settings, "default");
     }
     let tools = tools::get()?;
@@ -667,6 +731,224 @@ mod tests {
         };
         assert_eq!(profiles(&s).unwrap(), vec![first, second]);
     }
+    #[test]
+    fn fallback_distinguishes_access_failures_from_local_errors_and_video_ids() {
+        for message in [
+            "ERROR: [youtube] clip429: HTTP Error 403: Forbidden",
+            "ERROR: [instagram] connection-story: This content is not available, login required",
+            "HTTP status client error (401 Unauthorized)",
+            "Join to access this members-only video",
+            "You do not have permission to view this private video",
+        ] {
+            assert!(is_access_error(&anyhow::anyhow!(message)), "{message}");
+        }
+        for message in [
+            "ERROR: ffmpeg not found",
+            "ERROR: Postprocessing: conversion failed for private-video-403.mp4",
+            "ERROR: Unable to open for writing: access is denied",
+            "ERROR: HTTP Error 429: Too Many Requests",
+            "ERROR: connection reset while requesting https://example.com/private/403",
+            "ERROR: clip403-cookie failed: Unsupported URL",
+            "ERROR: HTTP Error 4030",
+        ] {
+            assert!(!is_access_error(&anyhow::anyhow!(message)), "{message}");
+        }
+        let local = anyhow::Error::from(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Access denied",
+        ));
+        assert!(!is_access_error(&local));
+    }
+    #[test]
+    fn manual_cookie_exports_are_unchanged_and_temporary_copies_are_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("cookies.txt");
+        fs::write(&original, "original cookie jar").unwrap();
+        let settings = Settings {
+            cookies_file: original.display().to_string(),
+            ..Settings::default()
+        };
+        for fail in [false, true] {
+            let mut temporary = PathBuf::new();
+            let result = with_auth(
+                &settings,
+                &AtomicBool::new(false),
+                |_, _, _| {},
+                |s, id| {
+                    assert_eq!(id, "default");
+                    temporary = PathBuf::from(&s.cookies_file);
+                    assert_ne!(temporary, original);
+                    assert_eq!(fs::read_to_string(&temporary)?, "original cookie jar");
+                    fs::write(&temporary, "updated by media tool")?;
+                    if fail {
+                        bail!("HTTP Error 403")
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert_eq!(result.is_err(), fail);
+            assert!(!temporary.exists());
+            assert_eq!(
+                fs::read_to_string(&original).unwrap(),
+                "original cookie jar"
+            );
+        }
+    }
+    /// Full authentication path: the local server only serves media to the eighth account.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires bundled tools and WFM_TEST_MEDIA"]
+    fn real_http_download_uses_eighth_profile_and_preserves_manual_cookie_export() {
+        use std::{
+            io::{BufRead, BufReader},
+            net::TcpListener,
+            sync::{Arc, Mutex},
+        };
+        let media = Arc::new(fs::read(std::env::var_os("WFM_TEST_MEDIA").unwrap()).unwrap());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let server = {
+            let (stop, observed, media) = (stop.clone(), observed.clone(), media.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut first = String::new();
+                    if reader.read_line(&mut first).is_err() {
+                        continue;
+                    }
+                    let mut cookie = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                            break;
+                        }
+                        if let Some(value) = line.to_ascii_lowercase().strip_prefix("cookie:") {
+                            cookie = value.trim().into();
+                        }
+                    }
+                    let identity = cookie
+                        .split(';')
+                        .map(str::trim)
+                        .find(|s| s.starts_with("sessionid="))
+                        .unwrap_or("");
+                    observed.lock().unwrap().push(identity.to_owned());
+                    if identity != "sessionid=account_7" {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
+                    } else {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\nSet-Cookie: server_cookie=updated; Path=/\r\nConnection: close\r\n\r\n",
+                            media.len()
+                        );
+                        if !first.starts_with("HEAD ") {
+                            let _ = stream.write_all(&media);
+                        }
+                    }
+                }
+            })
+        };
+        let root = tempfile::tempdir().unwrap();
+        let cache = root.path().join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let mut selected = Vec::new();
+        for n in 0..8 {
+            let p = profile(
+                if n < 6 {
+                    Browser::Chrome
+                } else {
+                    Browser::Brave
+                },
+                root.path().join(format!("Profile {n}")),
+            );
+            let snapshot = Snapshot {
+                captured: now(),
+                last_refresh: now(),
+                content: format!(
+                    "# Netscape HTTP Cookie File\n127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\taccount_{n}\n"
+                ),
+            };
+            platform::save_secret(
+                &cache.join(format!("{}.session", key(&p))),
+                &serde_json::to_vec(&snapshot).unwrap(),
+            )
+            .unwrap();
+            selected.push(p);
+        }
+        let settings = Settings {
+            cookies_mode: CookieMode::Selected,
+            cookies_auto_refresh: false,
+            cookie_profiles: selected,
+            ..Settings::default()
+        };
+        let cancel = AtomicBool::new(false);
+        let tools = tools::get().unwrap();
+        let job = crate::model::Job {
+            url: format!("http://{address}/private-fixture.mp4"),
+            directory: root.path().display().to_string(),
+            ..Default::default()
+        };
+        let result = with_auth_at(
+            &settings,
+            &cancel,
+            &cache,
+            &tools.downloader,
+            |_, _, _| {},
+            |s, id| crate::media::download_one(&job, s, id, &cancel, &|_| {}),
+        );
+        // Also exercise metadata inspection: yt-dlp receives Set-Cookie but must not rewrite the user's export.
+        let cookie_path = root.path().join("manual.txt");
+        let original =
+            "# Netscape HTTP Cookie File\n127.0.0.1\tFALSE\t/\tFALSE\t0\tsessionid\taccount_7\n";
+        fs::write(&cookie_path, original).unwrap();
+        let manual = Settings {
+            cookies_file: cookie_path.display().to_string(),
+            ..Settings::default()
+        };
+        let metadata = crate::media::inspect(&job.url, &manual, &cancel);
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+        let output = result.unwrap();
+        assert_eq!(
+            Sha256::digest(fs::read(&output).unwrap()),
+            Sha256::digest(media.as_slice())
+        );
+        assert!(metadata.is_ok(), "{metadata:?}");
+        assert_eq!(fs::read_to_string(cookie_path).unwrap(), original);
+        let mut order = observed.lock().unwrap().clone();
+        order.dedup();
+        assert_eq!(
+            order,
+            (0..8)
+                .map(|n| format!("sessionid=account_{n}"))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            fs::read_dir(root.path())
+                .unwrap()
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "mp4"))
+                .count(),
+            1
+        );
+    }
 
     /// Synthetic databases only; see scripts/create-cookie-fixtures.py. Never uses personal profiles.
     #[cfg(windows)]
@@ -759,6 +1041,13 @@ mod tests {
         let fresh = snapshot(p, cache.path(), &downloader, true, true, &cancel).unwrap();
         assert!(fresh.content.contains("SYNTHETIC_chrome_0"));
         assert!(fresh.captured > 0);
+        let mut future = fresh.clone();
+        future.captured = now() + 3600;
+        future.last_refresh = future.captured;
+        platform::save_secret(&path, &serde_json::to_vec(&future).unwrap()).unwrap();
+        let clock_recovered = snapshot(p, cache.path(), &downloader, true, false, &cancel).unwrap();
+        assert!(clock_recovered.captured <= now());
+        assert!(clock_recovered.last_refresh <= now());
         // An unreadable profile is skipped; a disabled one is never tried.
         let mut bad = profile(Browser::Chrome, cache.path().join("missing-profile"));
         let mut selected = s.clone();

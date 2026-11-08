@@ -49,7 +49,7 @@ struct Filter {
     state: Option<JobState>,
 }
 enum Event {
-    Cookies(Result<crate::cookies::RefreshReport>, bool, bool),
+    Cookies(Result<crate::cookies::RefreshReport>, bool, u64),
     Done(Result<String>),
     Notice(Result<String>),
     Search(Result<Vec<crate::fastshare::SearchResult>>),
@@ -90,6 +90,9 @@ pub struct App {
     created_installer: Option<PathBuf>,
     setup_saved: Option<Settings>,
     cookies_busy: bool,
+    cookie_epoch: u64,
+    cookie_cancel: Arc<AtomicBool>,
+    cookie_task: Option<std::thread::JoinHandle<()>>,
     cookie_results: Vec<(String, std::result::Result<usize, String>)>,
     links: String,
     format: String,
@@ -177,6 +180,9 @@ impl App {
             created_installer: None,
             setup_saved: None,
             cookies_busy: false,
+            cookie_epoch: 0,
+            cookie_cancel: Arc::new(AtomicBool::new(false)),
+            cookie_task: None,
             cookie_results: Vec::new(),
             links: String::new(),
             selected: HashSet::new(),
@@ -288,6 +294,11 @@ impl App {
         };
     }
     fn save(&mut self) -> Result<()> {
+        if self.cookies_busy {
+            anyhow::bail!(
+                "Wait for browser profiles to finish loading / Počkejte na dokončení načítání profilů prohlížečů"
+            );
+        }
         self.settings.validate()?;
         if self.preview {
             return Ok(());
@@ -386,12 +397,18 @@ impl App {
             return;
         }
         self.quitting = true;
+        self.invalidate_cookie_request();
+        let cookie_task = self.cookie_task.take();
         self.monitor_ready.store(false, Ordering::Relaxed);
         let engine = self.engine.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             engine.shutdown();
+            // Let temporary cookie files be removed before the process exits.
+            if let Some(task) = cookie_task {
+                let _ = task.join();
+            }
             let _ = tx.send(Event::Stopped);
             ctx.request_repaint();
         });
@@ -458,10 +475,10 @@ impl App {
         }
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                Event::Cookies(result, refreshed, in_setup) => {
+                Event::Cookies(result, refreshed, epoch) => {
                     self.cookies_busy = false;
                     self.busy = self.busy.saturating_sub(1);
-                    if self.setup.is_some() != in_setup {
+                    if self.cookie_epoch != epoch {
                         continue;
                     }
                     match result {
@@ -1601,9 +1618,22 @@ fn sort_jobs(jobs: &mut [Job], sort: Sort) {
 
 impl App {
     fn begin_setup(&mut self) {
+        self.invalidate_cookie_request();
         self.setup_saved = Some(self.settings.clone());
         self.setup = Some(0);
         self.notice.clear();
+    }
+    fn invalidate_cookie_request(&mut self) {
+        self.cookie_epoch = self.cookie_epoch.wrapping_add(1);
+        self.cookie_cancel.store(true, Ordering::Relaxed);
+        self.cookie_results.clear();
+    }
+    fn cancel_setup(&mut self) {
+        self.invalidate_cookie_request();
+        if let Some(saved) = self.setup_saved.take() {
+            self.settings = saved;
+        }
+        self.setup = None;
     }
 
     fn export_installer(&mut self, ctx: &egui::Context) {
@@ -2184,14 +2214,22 @@ impl App {
         );
     }
     fn load_cookie_profiles(&mut self, ctx: &egui::Context, refresh: bool) {
+        if self.cookies_busy {
+            return;
+        }
+        if let Some(previous) = self.cookie_task.take() {
+            let _ = previous.join();
+        }
+        self.cookie_epoch = self.cookie_epoch.wrapping_add(1);
+        self.cookie_cancel = Arc::new(AtomicBool::new(false));
         self.cookies_busy = true;
         self.busy += 1;
         let settings = self.settings.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
-        let cancel = self.stop.clone();
-        let in_setup = self.setup.is_some();
-        std::thread::spawn(move || {
+        let cancel = self.cookie_cancel.clone();
+        let epoch = self.cookie_epoch;
+        self.cookie_task = Some(std::thread::spawn(move || {
             let result = if refresh {
                 crate::cookies::refresh(&settings, &cancel)
             } else {
@@ -2200,9 +2238,9 @@ impl App {
                     results: Vec::new(),
                 })
             };
-            let _ = tx.send(Event::Cookies(result, refresh, in_setup));
+            let _ = tx.send(Event::Cookies(result, refresh, epoch));
             ctx.request_repaint();
-        });
+        }));
     }
     fn cookies_settings(&mut self, ui: &mut egui::Ui) {
         let lang = self.settings.language.clone();
@@ -2552,7 +2590,13 @@ impl App {
         ui.horizontal(|ui| {
             style::title(ui, tr(&lang, "Nastavení", "Settings"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if style::primary(ui, tr(&lang, "Uložit nastavení", "Save settings")).clicked() {
+                if ui
+                    .add_enabled_ui(!self.cookies_busy, |ui| {
+                        style::primary(ui, tr(&lang, "Uložit nastavení", "Save settings"))
+                    })
+                    .inner
+                    .clicked()
+                {
                     let r = self
                         .save()
                         .map(|_| tr(&lang, "Nastavení uloženo", "Settings saved").to_string());
@@ -2845,9 +2889,10 @@ impl App {
                 )
             };
             if ui
-                .add_enabled_ui(!self.builder || self.busy == 0, |ui| {
-                    style::primary(ui, next_label)
-                })
+                .add_enabled_ui(
+                    !self.cookies_busy && (!self.builder || self.busy == 0),
+                    |ui| style::primary(ui, next_label),
+                )
                 .inner
                 .clicked()
             {
@@ -2887,10 +2932,7 @@ impl App {
             }
             if ui.button(tr(&lang, "Zrušit", "Cancel")).clicked() {
                 if self.monitor_ready.load(Ordering::Relaxed) {
-                    if let Some(saved) = self.setup_saved.take() {
-                        self.settings = saved;
-                    }
-                    self.setup = None;
+                    self.cancel_setup();
                 } else {
                     self.quit(ui.ctx());
                 }
@@ -3246,6 +3288,9 @@ mod tests {
             created_installer: None,
             setup_saved: None,
             cookies_busy: false,
+            cookie_epoch: 0,
+            cookie_cancel: Arc::new(AtomicBool::new(false)),
+            cookie_task: None,
             cookie_results: Vec::new(),
             links: String::new(),
             format: "MP4".into(),
@@ -3457,6 +3502,65 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn cancelled_setup_ignores_late_cookie_results_after_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = form_app(dir.path());
+        app.begin_setup();
+        app.cookies_busy = true;
+        app.busy = 1;
+        app.cookie_cancel = Arc::new(AtomicBool::new(false));
+        let cancelled = app.cookie_cancel.clone();
+        let epoch = app.cookie_epoch;
+        assert!(app.save().is_err());
+        app.settings.cookies_mode = model::CookieMode::All;
+        app.cancel_setup();
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert_eq!(app.settings.cookies_mode, model::CookieMode::Single);
+        app.begin_setup();
+        app.tx
+            .send(Event::Cookies(
+                Ok(crate::cookies::RefreshReport {
+                    profiles: vec![model::CookieProfile {
+                        browser: model::Browser::Chrome,
+                        path: String::new(),
+                        label: "Discarded result".into(),
+                        enabled: true,
+                    }],
+                    results: Vec::new(),
+                }),
+                false,
+                epoch,
+            ))
+            .unwrap();
+        app.events(&egui::Context::default());
+        assert!(app.settings.cookie_profiles.is_empty());
+        assert!(!app.cookies_busy);
+        assert_eq!(app.busy, 0);
+    }
+    #[test]
+    fn quitting_waits_for_cookie_worker_to_clean_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = form_app(dir.path());
+        let cookie = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        let path = cookie.path().to_owned();
+        let cancel = app.cookie_cancel.clone();
+        app.cookie_task = Some(std::thread::spawn(move || {
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            drop(cookie);
+        }));
+        let ctx = egui::Context::default();
+        app.quit(&ctx);
+        let started = Instant::now();
+        while !app.exit_ready && started.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(10));
+            app.events(&ctx);
+        }
+        assert!(app.exit_ready);
+        assert!(!path.exists());
     }
     #[test]
     fn display_sort_does_not_change_queue() {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1
+
+- Fixed account fallback misclassifying local file/tool failures or digits in video IDs as authentication or rate-limit errors.
+- Preserved original Netscape cookie exports during metadata inspection as well as downloads; temporary copies are removed on success and failure.
+- Cancelling and reopening setup now discards pending profile results. Saving waits for profile loading to finish, and application shutdown cancels and joins the cookie worker before exiting.
+- Corrected cookie-refresh timing after the system clock moves backwards.
+- Added a real local HTTP integration test that denies seven accounts, serves the video to the eighth, verifies identical output bytes and checks that Set-Cookie responses do not modify the original export.
+
 ## 0.8.0
 
 - Added separate browser-cookie identities: one default profile, selected profiles in a configurable order, or all profiles from selected browsers. Settings and both setup guides include the new controls.

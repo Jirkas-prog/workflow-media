@@ -6,7 +6,7 @@ A Rust desktop downloader with a dark interface, a download queue and a separate
 
 [![Download Setup Builder](https://img.shields.io/badge/SETUP_BUILDER-WINDOWS_EXE-86c8db?style=for-the-badge&logo=windows&logoColor=152731)](https://github.com/Jirkas-prog/workflow-media/releases/latest/download/WorkFlow-Media-Setup-Builder-Windows-x64.exe)
 
-[Česky](README.cs.md) · [Setup Builder guide](SETUP-BUILDER.md) · [Linux build guide](BUILD-LINUX.md) · [Build and release](BUILD.md) · [Licenses](THIRD-PARTY.md)
+[Česky](README.cs.md) · [Setup Builder guide](SETUP-BUILDER.md) · [Linux build guide](BUILD-LINUX.md) · [Build and release](BUILD.md) · [Test coverage](TESTING.md) · [Licenses](THIRD-PARTY.md)
 
 ## Features
 
