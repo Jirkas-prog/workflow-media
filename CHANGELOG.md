@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3
+
+- Replaced download progress bars in the file table with plain percentage text, matching completed rows.
+
 ## 0.8.2
 
 - Every media download and metadata lookup now starts without cookies. Browser discovery, decryption, cache locking and refresh are delayed until an access/sign-in failure; public downloads no longer depend on accessible browser profiles.

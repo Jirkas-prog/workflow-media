@@ -1056,12 +1056,7 @@ impl App {
                                 if job.state == JobState::Completed {
                                     ui.label("100 %");
                                 } else if job.state.active() {
-                                    ui.add(
-                                        egui::ProgressBar::new((job.percent / 100.) as f32)
-                                            .desired_width(ui.available_width())
-                                            .show_percentage()
-                                            .fill(LIME),
-                                    );
+                                    ui.label(format!("{:.0} %", job.percent));
                                 } else {
                                     ui.label("—");
                                 }
